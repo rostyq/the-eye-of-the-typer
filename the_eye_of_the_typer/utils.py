@@ -315,23 +315,35 @@ def rerun(p: "Participant"):
         screen_height = screen_height // screen_scale_factor
 
     rr.log(
-        f"world/screen",
+        f"screen",
         rr.Boxes2D(
             sizes=[[screen_width, screen_height]],
             centers=[[screen_width / 2, screen_height / 2]],
         ),
         timeless=True,
     )
-    rr.log("world/screen", rr.Pinhole(focal_length=0, principal_point=[screen_width / 2, screen_height / 2]))
 
-    i: int
-    source: Literal["tobii", "log", "screen", "webcam"]
-    offset: timedelta
-    for i, offset, source in sync_dataframe(p).iter_rows():
-        rr.set_time_sequence(f"{source}_index", i)
-        rr.set_time_seconds("capture_time", offset.total_seconds())
+    rr.log(
+        "participant/pupil/left/tobii",
+        rr.SeriesLine(color=[255, 255, 0], width=1, name="left pupil diameter (tobii)"),
+        timeless=True,
+    )
+    rr.log(
+        "participant/pupil/right/tobii",
+        rr.SeriesLine(
+            color=[255, 0, 255], width=1, name="right pupil diameter (tobii)"
+        ),
+        timeless=True,
+    )
 
-        match source:
+    frame_index: int
+    source_name: Literal["tobii", "log", "screen", "webcam"]
+    offset_time: timedelta
+    for frame_index, offset_time, source_name in sync_dataframe(p).iter_rows():
+        rr.set_time_sequence(f"{source_name}_index", frame_index)
+        rr.set_time_seconds("capture_time", offset_time.total_seconds())
+
+        match source_name:
             case "screen" if screen_cap is not None:
                 rr.set_time_seconds(
                     "screen_time", screen_cap.get(cv.CAP_PROP_POS_MSEC) / 1_000
@@ -342,22 +354,24 @@ def rerun(p: "Participant"):
 
                 success, frame = screen_cap.read()
 
-                if not success or i % 4 != 0:
+                if not success or frame_index % 4 != 0:
                     continue
 
                 frame = cv.resize(frame, (screen_width, screen_height))
                 frame = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
-                rr.log("world/screen", rr.Image(frame))
+                rr.log("screen", rr.Image(frame))
 
             case "tobii":
-                entry: TobiiEntry = p.tobii_gaze_predictions.row(i, named=True)
+                entry: TobiiEntry = p.tobii_gaze_predictions.row(
+                    frame_index, named=True
+                )
 
                 for eye in ("left", "right"):
                     if entry[f"{eye}_gaze_point_validity"]:
                         x, y = entry[f"{eye}_gaze_point_on_display_area"]
                         rr.log(
-                            f"world/screen/gazepoint/{eye}/tobii",
+                            f"screen/gazepoint/{eye}/tobii",
                             rr.Points2D(
                                 [[x * screen_width, y * screen_height]],
                                 colors=[[0, 0, 255]],
@@ -366,17 +380,22 @@ def rerun(p: "Participant"):
                         )
                     else:
                         rr.log(
-                            f"world/screen/gazepoint/{eye}/tobii",
+                            f"screen/gazepoint/{eye}/tobii",
                             rr.Clear(recursive=True),
                         )
 
-                    if entry[f"{eye}_pupil_validity"]:
+                    if (
+                        entry[f"{eye}_pupil_validity"]
+                        and entry[f"{eye}_pupil_diameter"] > 0
+                    ):
                         rr.log(
                             f"participant/pupil/{eye}/tobii",
                             rr.Scalar(entry[f"{eye}_pupil_diameter"]),
                         )
                     else:
-                        rr.log(f"participant/pupil/{eye}/tobii", rr.Clear(recursive=True))
+                        rr.log(
+                            f"participant/pupil/{eye}/tobii", rr.Clear(recursive=True)
+                        )
 
             case "log":
                 level_map = {
@@ -387,7 +406,7 @@ def rerun(p: "Participant"):
                     "click": rr.TextLogLevel.WARN,
                     "text": rr.TextLogLevel.INFO,
                 }
-                entry: LogEntry = p.user_interaction_logs.row(i, named=True)
+                entry: LogEntry = p.user_interaction_logs.row(frame_index, named=True)
                 event_type = entry["event"]
                 if event_type is not None:
                     rr.log(
@@ -398,7 +417,7 @@ def rerun(p: "Participant"):
                 match event_type:
                     case "mouse":
                         rr.log(
-                            "world/screen/mouse",
+                            "screen/mouse",
                             rr.Points2D(
                                 [
                                     [
