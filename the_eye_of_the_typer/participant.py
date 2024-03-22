@@ -1,12 +1,13 @@
 from typing import TYPE_CHECKING, Optional
 from pathlib import Path as _Path
 from dataclasses import dataclass as _dataclass, asdict as _asdict
-from re import match as _match
+from re import match as _match, search as _search
 from functools import cached_property as _cached_property
 
 import datetime as _datetime
 
 from . import characteristics as _c, utils as _utils
+from .study import Study as _Study
 
 if TYPE_CHECKING:
     from os import PathLike
@@ -167,6 +168,25 @@ class Participant:
     @_cached_property
     def tobii_frequency(self):
         return self.tobii_specs[2]
+
+    def get_webcam_video_paths(
+        self, *, study: Optional[_Study] = None, index: int | None = None
+    ) -> list[_Path]:
+        pattern: str | None = None
+        paths = self.webcam_video_paths
+
+        match (study, index):
+            case (s, i) if i is not None and s is not None:
+                pattern = r"_%s_-study-%s[\. ]" % (i, s)
+            case (None, i) if i is not None:
+                pattern = r"_%s_-study-" % i
+            case (s, None) if s is not None:
+                pattern = r"-study-%s[\. ]" % s
+
+        if pattern is not None:
+            return [p for p in paths if _search(pattern, p.name)]
+        else:
+            return paths
 
     def to_dict(self):
         return _asdict(self)
