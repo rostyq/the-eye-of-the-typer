@@ -12,8 +12,13 @@ if TYPE_CHECKING:
     from os import PathLike
 
 
-RECORDING_START_TIME_ADJUSTMENTS = {1: 5.45 + 0.875}
-
+# The following are the time adjustments for the start of the screen recording
+# for each participant in the dataset. It is determined manually by visually
+# inspecting the screen recording for notable events such as mouse clicks.
+# The adjustments are in seconds.
+RECORDING_START_TIME_ADJUSTMENTS: dict[int, float] = {
+    1: 5.45 + 0.875
+}
 
 @_dataclass(frozen=True, kw_only=True)
 class Participant:
