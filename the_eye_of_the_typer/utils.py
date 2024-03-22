@@ -256,8 +256,6 @@ def read_tobii_specs(p: PathLike):
 
 
 def get_timeline(p: "Participant") -> pl.DataFrame:
-    from .study import Study
-
     tobii_df = p.tobii_gaze_predictions.select("true_time")
     tobii_df = tobii_df.with_columns(
         offset=(pl.col("true_time") - p.start_time).cast(pl.Duration("us"))
@@ -265,7 +263,7 @@ def get_timeline(p: "Participant") -> pl.DataFrame:
     tobii_df = tobii_df.drop("true_time").with_row_index("frame")
 
     log_df = p.user_interaction_logs.select("epoch", "study", "index")
-    log_df = log_df.select("epoch").with_columns(
+    log_df = log_df.with_columns(
         offset=(pl.col("epoch") - p.start_time).cast(pl.Duration("us")),
     )
     log_df = log_df.drop("epoch").with_row_index("frame")
@@ -290,6 +288,6 @@ def get_timeline(p: "Participant") -> pl.DataFrame:
             key: df.with_columns(pl.lit(key, pl.Categorical).alias("source"))
             for key, df in dfs.items()
         }
-        sync_df = pl.concat([df for df in dfs.values()], how="vertical")
+        sync_df = pl.concat([df for df in dfs.values()], how="align")
 
-    return sync_df.sort("offset", "frame")
+    return sync_df.sort("offset", "frame").fill_null(strategy="forward")
