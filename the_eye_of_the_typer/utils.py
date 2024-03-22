@@ -77,6 +77,8 @@ def get_video_fps(p: PathLike):
 
 
 def lookup_webcam_video_paths(root: Optional["PathLike"] = None):
+    from .study import Study
+
     paths = [
         path
         for path in Path(root or get_dataset_root()).glob("**/*.webm")
@@ -88,10 +90,12 @@ def lookup_webcam_video_paths(root: Optional["PathLike"] = None):
         name = p.name
         log_id = int(match(r"(\d+)_", name).group(1))
         index = int(search(r"_(\d+)_", name).group(1))
+        study = search(r"-study-([a-z_]+)[\. ]", name).group(1)
+        study = Study(study).position
 
         aux = search(r"\((\d+)\)", name)
         aux = int(aux.group(1)) if aux is not None else 0
-        return pid, log_id, index, aux
+        return pid, log_id, index, study, aux
 
     paths.sort(key=parse_indices)
 

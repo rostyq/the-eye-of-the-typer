@@ -1,4 +1,5 @@
 from enum import StrEnum as _StrEnum, auto as _auto
+from functools import cached_property as _cached_property
 
 
 class Study(_StrEnum):
@@ -22,3 +23,11 @@ class Study(_StrEnum):
     DOT_TEST_FINAL_INSTRUCTIONS = _auto()
     DOT_TEST_FINAL = _auto()
     THANK_YOU = _auto()
+
+    @classmethod
+    def from_position(cls, position: int):
+        return cls.__members__[cls._member_names_[position]]
+
+    @_cached_property
+    def position(self):
+        return self.__class__._member_names_.index(self.name)
