@@ -34,7 +34,7 @@ __all__ = [
 
 def get_dataset_root():
     return (
-        Path(environ.get("THE_EYE_OF_THE_TYPER_DATASET_PATH", Path.cwd()))
+        Path(environ.get("EOTT_DATASET_PATH", Path.cwd()))
         .expanduser()
         .resolve()
     )
