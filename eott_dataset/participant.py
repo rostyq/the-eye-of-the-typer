@@ -6,7 +6,7 @@ from functools import cached_property as _cached_property
 
 import datetime as _datetime
 
-from . import characteristics as _c, utils as _utils
+from . import characteristics as _c, utils as _util, data as _ds
 from .study import Study as _Study
 
 if TYPE_CHECKING:
@@ -95,7 +95,7 @@ class Participant:
     @classmethod
     def create(cls, dataset: Optional["PathLike"] = None, **kwargs):
         return cls(
-            root=cls.get_root(dataset or _utils.get_dataset_root(), kwargs["pid"]),
+            root=cls.get_root(dataset or _util.get_dataset_root(), kwargs["pid"]),
             **{
                 key: value(kwargs.pop(key)) for key, value in _c.CHARACTERISTICS.items()
             },
@@ -130,6 +130,10 @@ class Participant:
         return self.root / "specs.txt"
 
     @_cached_property
+    def dottest_locations_path(self):
+        return self.root / "final_dot_test_locations.tsv"
+
+    @_cached_property
     def screen_recording_path(self):
         return self.root / f"{self.participant_id}.mov"
 
@@ -143,23 +147,27 @@ class Participant:
 
     @_cached_property
     def webcam_video_paths(self):
-        return _utils.lookup_webcam_video_paths(self.root)
+        return _util.lookup_webcam_video_paths(self.root)
 
     @_cached_property
     def user_interaction_logs(self):
-        return _utils.read_user_interaction_logs(self.user_interaction_logs_path)
+        return _ds.read_user_interaction_logs(self.user_interaction_logs_path)
 
     @_cached_property
     def tobii_gaze_predictions(self):
-        return _utils.read_tobii_gaze_predictions(self.tobii_gaze_predictions_path)
+        return _ds.read_tobii_gaze_predictions(self.tobii_gaze_predictions_path)
 
     @_cached_property
     def tobii_calibration_points(self):
-        return _utils.read_tobii_calibration_points(self.tobii_gaze_predictions_path)
+        return _ds.read_tobii_calibration_points(self.tobii_gaze_predictions_path)
+
+    @_cached_property
+    def dottest_locations(self):
+        return _ds.read_dottest_locations(self.dottest_locations_path)
 
     @_cached_property
     def tobii_specs(self):
-        return _utils.read_tobii_specs(self.tobii_specs_path)
+        return _ds.read_tobii_specs(self.tobii_specs_path)
 
     @_cached_property
     def tobii_ilumination_mode(self):

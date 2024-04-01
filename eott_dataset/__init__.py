@@ -5,3 +5,4 @@ from .names import *
 from .schemas import *
 from .study import *
 from .entries import *
+from .data import *

@@ -45,3 +45,9 @@ class LogEntry(_TypedDict):
     study: str
     log_id: int
     index: int
+
+
+class DotEntry(_TypedDict):
+    dot_x: int
+    dot_y: int
+    epoch: _datetime

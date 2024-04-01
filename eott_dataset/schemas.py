@@ -5,6 +5,7 @@ from .names import (
     LogField as _Log,
     TobiiField as _Tobii,
     SpecColumn as _Spec,
+    DotColumn as _Dot,
 )
 
 
@@ -94,4 +95,10 @@ SPEC_SCHEMA: dict[_Spec, type] = {
     _Spec.PREDICTION_X_RIGHT: _pl.Float64,
     _Spec.PREDICTION_Y_RIGHT: _pl.Float64,
     _Spec.VALIDITY_RIGHT: _pl.Int8,
+}
+
+DOTTEST_SCHEMA: dict[_Dot, type] = {
+    _Dot.DOT_X: _pl.UInt16,
+    _Dot.DOT_Y: _pl.UInt16,
+    _Dot.EPOCH: _pl.Float64,
 }

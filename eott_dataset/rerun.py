@@ -4,7 +4,8 @@ import rerun as rr
 from .entries import *
 
 
-def rerun_log_tobii(entry: TobiiEntry, sw: float = 1.0, sh: float = 1.0):
+def rerun_log_tobii(entry: TobiiEntry, *, screen: tuple[int, int]):
+    sw, sh = screen
     for eye in ("left", "right"):
         if entry[f"{eye}_gaze_point_validity"]:
             x, y = entry[f"{eye}_gaze_point_on_display_area"]
@@ -31,8 +32,13 @@ def rerun_log_tobii(entry: TobiiEntry, sw: float = 1.0, sh: float = 1.0):
             rr.log(f"participant/pupil/{eye}/tobii", rr.Clear(recursive=True))
 
 
-def rerun_log_screen(cap: cv.VideoCapture, position: int, width: int, height: int):
-    if position != cap.get(cv.CAP_PROP_POS_FRAMES):
+def rerun_log_screen(
+    cap: cv.VideoCapture,
+    *,
+    position: int | None = None,
+    size: tuple[int, int] | None = None,
+):
+    if position is not None and position != cap.get(cv.CAP_PROP_POS_FRAMES):
         cap.set(cv.CAP_PROP_POS_FRAMES, position)
         rr.log(
             "log/event",
@@ -45,16 +51,36 @@ def rerun_log_screen(cap: cv.VideoCapture, position: int, width: int, height: in
     success, image = cap.read()
 
     if not success:
-        cap.release()
-        return None
+        return cap.release()
 
     if position % 10 != 0:
         return cap
 
-    image = cv.resize(image, (width, height))
+    if size is not None:
+        image = cv.resize(image, size)
+
     image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
 
     rr.log("screen", rr.Image(image))
+    return cap
+
+
+def rerun_log_webcam(
+    cap: cv.VideoCapture, *, name: str | None = None, scale: float = 1.0
+):
+    if name is not None:
+        time = cap.get(cv.CAP_PROP_POS_MSEC) / 1_000
+        rr.set_time_seconds(f"{name}_time", time)
+
+    success, image = cap.read()
+
+    if not success:
+        return cap.release()
+
+    h, w, _ = image.shape
+    image = cv.resize(image, (int(w * scale), int(h * scale)))
+    image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    rr.log("webcam", rr.Image(image))
     return cap
 
 
@@ -86,6 +112,7 @@ def rerun_log_user(entry: LogEntry, scale: float = 1.0, index: int | None = None
             pass
 
         case "mouse":
+            screen_x, screen_y = entry["screen_x"], entry["screen_y"]
             # rr.log(
             #     "log/event",
             #     rr.TextLog("mouse move", level=rr.TextLogLevel.TRACE),
@@ -93,12 +120,7 @@ def rerun_log_user(entry: LogEntry, scale: float = 1.0, index: int | None = None
             rr.log(
                 "screen/mouse",
                 rr.Points2D(
-                    [
-                        [
-                            entry["screen_x"] / scale,
-                            entry["screen_y"] / scale,
-                        ]
-                    ],
+                    [[screen_x * scale, screen_y * scale]],
                     colors=[(255, 255, 0)],
                     radii=[1],
                 ),

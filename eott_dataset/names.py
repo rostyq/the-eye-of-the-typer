@@ -87,3 +87,9 @@ class SpecColumn(_StrEnum):
     PREDICTION_Y_LEFT = _auto()
     PREDICTION_X_RIGHT = _auto()
     PREDICTION_Y_RIGHT = _auto()
+
+
+class DotColumn(_StrEnum):
+    DOT_X = "Dot_X"
+    DOT_Y = "Dot_Y"
+    EPOCH = "Epoch"
