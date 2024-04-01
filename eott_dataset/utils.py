@@ -1,13 +1,16 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Callable, Union
 from io import IOBase
 from typing import Literal
 from os import PathLike, environ
 from pathlib import Path
 from subprocess import check_output
 from re import match, search
+from datetime import datetime
+from functools import lru_cache
 
 import polars as pl
 
+from .study import Study
 
 if TYPE_CHECKING:
     from .participant import Participant
@@ -24,6 +27,8 @@ __all__ = [
     "read_tobii_calibration_points",
     "read_tobii_specs",
     "get_timeline",
+    "clear_count_video_frames_cache",
+    "Source",
 ]
 
 
@@ -35,7 +40,8 @@ def get_dataset_root():
     )
 
 
-def count_video_frames(p: "PathLike", verify: bool = False):
+@lru_cache(maxsize=128)
+def _count_video_frames(path: str, verify: bool):
     args = [
         "ffprobe",
         "-v",
@@ -47,11 +53,19 @@ def count_video_frames(p: "PathLike", verify: bool = False):
         "stream=nb_read_frames" if verify else "stream=nb_read_packets",
         "-of",
         "csv=p=0",
-        str(Path(p).expanduser().absolute()),
+        path,
     ]
     result = check_output(args, shell=True).decode("utf-8").strip()
 
     return int(result)
+
+
+def clear_count_video_frames_cache():
+    _count_video_frames.cache_clear()
+
+
+def count_video_frames(p: "PathLike", verify: bool = False):
+    return _count_video_frames(str(Path(p).expanduser().absolute()), verify)
 
 
 def get_video_fps(p: PathLike):
@@ -259,39 +273,109 @@ def read_tobii_specs(p: PathLike):
     return tracking_box, ilumination_mode, frequency
 
 
-def get_timeline(p: "Participant") -> pl.DataFrame:
-    tobii_df = p.tobii_gaze_predictions.select("true_time")
-    tobii_df = tobii_df.with_columns(
-        offset=(pl.col("true_time") - p.start_time).cast(pl.Duration("us"))
+Source = Literal["log", "webcam", "tobii", "screen"]
+SourceType = pl.Enum(["log", "webcam", "tobii", "screen"])
+StudyType = pl.Enum([study.value for study in Study.__members__.values()])
+
+def _get_tobii_timeline(p: "Participant") -> pl.DataFrame:
+    df = p.tobii_gaze_predictions.select("true_time")
+    df = df.with_columns(
+        index=pl.lit(None, pl.UInt8),
+        study=pl.lit(None, StudyType),
+        source=pl.lit("tobii", SourceType),
     )
-    tobii_df = tobii_df.drop("true_time").with_row_index("frame")
+    df = df.with_columns(offset=(pl.col("true_time") - p.start_time))
+    df = df.with_columns(pl.col("offset").cast(pl.Duration("us")))
+    return df.drop("true_time").with_row_index("frame")
 
-    log_df = p.user_interaction_logs.select("epoch", "study", "index")
-    log_df = log_df.with_columns(
-        offset=(pl.col("epoch") - p.start_time).cast(pl.Duration("us")),
+
+def _get_log_timeline(p: "Participant") -> pl.DataFrame:
+    df = p.user_interaction_logs.select("epoch", "index", "study")
+    df = df.with_columns(pl.col("study").cast(StudyType))
+    df = df.with_columns(source=pl.lit("log", SourceType))
+    df = df.with_columns(offset=pl.col("epoch") - p.start_time)
+    df = df.with_columns(pl.col("offset").cast(pl.Duration("us")))
+    return df.drop("epoch").with_row_index("frame")
+
+
+def _get_screen_timeline(p: "Participant") -> Optional[pl.DataFrame]:
+    if p.screen_recording is None or not p.screen_recording_path.exists():
+        return None
+
+    offset = p.screen_offset
+    frames = count_video_frames(p.screen_recording_path, verify=False)
+    period = 1_000_000 / get_video_fps(p.screen_recording_path)
+
+    df = pl.DataFrame({"frame": pl.int_range(0, frames, dtype=pl.UInt32, eager=True)})
+    df = df.with_columns(
+        index=pl.lit(None, pl.UInt8),
+        study=pl.lit(None, StudyType),
+        source=pl.lit("screen", SourceType),
     )
-    log_df = log_df.drop("epoch").with_row_index("frame")
+    df = df.with_columns(offset=pl.col("frame") * period)
+    df = df.with_columns(pl.col("offset").cast(pl.Duration("us")) + offset)
+    return df
 
-    dfs = {"tobii": tobii_df, "log": log_df}
 
-    if p.screen_recording is not None:
-        frame_count = count_video_frames(p.screen_recording_path, verify=False)
-        frame_time = 1_000_000 / get_video_fps(p.screen_recording_path)
+def _get_webcam_timeline(p: "Participant") -> pl.DataFrame:
+    from .study import Study
 
-        screen_df = pl.int_range(0, frame_count, dtype=pl.UInt32, eager=True)
-        screen_df = pl.DataFrame({"frame": screen_df})
-        screen_df = screen_df.with_columns(
-            (pl.col("frame") * frame_time).cast(pl.Duration("us")).alias("offset")
-            + p.screen_offset,
+    df = p.user_interaction_logs.select("epoch", "index", "event", "study")
+    df = df.filter(pl.col("event").is_in(["start", "stop"]))
+    df = df.group_by("index", maintain_order=True).first().drop("event")
+
+    dfs: list[pl.DataFrame] = []
+
+    index: int
+    timestamp: datetime
+    for index, timestamp, study in df.iter_rows():
+        study = Study(study)
+        offset = timestamp - p.start_time
+
+        try:
+            path = p.get_webcam_video_paths(index=index, study=study)[0]
+        except IndexError:
+            continue
+
+        frame_count = count_video_frames(path, verify=True)
+        frame_time = 1_000_000 / get_video_fps(path)
+
+        df = pl.int_range(0, frame_count, dtype=pl.UInt32, eager=True)
+        df = pl.DataFrame({"frame": df})
+        df = df.with_columns(
+            index=pl.lit(index, pl.UInt8),
+            study=pl.lit(study, StudyType),
+            source=pl.lit("webcam", SourceType),
         )
+        df = df.with_columns(offset=pl.col("frame") * frame_time)
+        df = df.with_columns(pl.col("offset").cast(pl.Duration("us")) + offset)
 
-        dfs["screen"] = screen_df
+        dfs.append(df)
+
+    return pl.concat(dfs, how="vertical")
+
+
+def get_timeline(
+    p: "Participant", sources: Union[set[Source], Source, "ellipsis", None] = ...
+) -> pl.DataFrame:
+    fns: dict[Source, Callable[[Path], Optional[pl.DataFrame]]] = {
+        "log": _get_log_timeline,
+        "webcam": _get_webcam_timeline,
+        "tobii": _get_tobii_timeline,
+        "screen": _get_screen_timeline,
+    }
+
+    if sources is Ellipsis:
+        sources = {"log", "screen", "tobii", "webcam"}
+    elif isinstance(sources, str):
+        sources = set([sources])
+    elif sources is None or len(sources) == 0:
+        sources = {"log"}
+    else:
+        sources = set(sources)
 
     with pl.StringCache():
-        dfs = {
-            key: df.with_columns(pl.lit(key, pl.Categorical).alias("source"))
-            for key, df in dfs.items()
-        }
-        sync_df = pl.concat([df for df in dfs.values()], how="align")
+        dfs = [fns[source](p) for source in sources]
+        df = pl.concat([df for df in dfs if df is not None], how="vertical")
 
-    return sync_df.sort("offset", "frame").fill_null(strategy="forward")
+    return df.sort("offset").fill_null(strategy="forward")

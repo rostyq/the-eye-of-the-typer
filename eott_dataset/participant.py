@@ -182,11 +182,10 @@ class Participant:
                 pattern = r"_%s_-study-" % i
             case (s, None) if s is not None:
                 pattern = r"-study-%s[\. ]" % s
+            case (None, None):
+                return paths
 
-        if pattern is not None:
-            return [p for p in paths if _search(pattern, p.name)]
-        else:
-            return paths
+        return [p for p in paths if _search(pattern, p.name)]
 
     def to_dict(self):
         return _asdict(self)
