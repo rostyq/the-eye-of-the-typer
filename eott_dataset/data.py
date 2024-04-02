@@ -139,7 +139,7 @@ def read_tobii_gaze_predictions(p: PathLike | bytes | IOBase):
     from .schemas import TOBII_SCHEMA as SCHEMA
     from .names import TobiiField as F
 
-    df = pl.read_ndjson(p)
+    df = pl.read_ndjson(p, ignore_errors=True)
     df = df.with_columns(pl.col(key).cast(value) for key, value in SCHEMA.items())
     return df.with_columns((pl.col(F.TRUE_TIME) * 1e9).cast(pl.Datetime("ns")))
 
