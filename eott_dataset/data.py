@@ -93,7 +93,9 @@ def read_user_interaction_logs(p: PathLike | bytes | IOBase):
 
     with pl.StringCache():
         df = df.with_columns(
-            pl.col(key).cast(value[0]) for key, value in SCHEMA.items()
+            pl.col(key).cast(value[0])
+            for key, value in SCHEMA.items()
+            if key.value in df.columns
         )
         df = df.with_columns(
             pl.col(F.SESSION_ID)
@@ -117,9 +119,17 @@ def read_user_interaction_logs(p: PathLike | bytes | IOBase):
             pl.col(F.TIME).cast(pl.Duration("ms")),
         )
 
-    df = df.drop(key.value for key, value in SCHEMA.items() if value[1] is None)
+    df = df.drop(
+        key.value
+        for key, value in SCHEMA.items()
+        if key.value in df.columns and value[1] is None
+    )
     df = df.rename(
-        {key.value: value[1] for key, value in SCHEMA.items() if value[1] is not None}
+        {
+            key.value: value[1]
+            for key, value in SCHEMA.items()
+            if key.value in df.columns and value[1] is not None
+        }
     )
 
     return df.sort(by="epoch")
@@ -202,9 +212,10 @@ def read_dottest_locations(p: PathLike):
     return df.with_columns(pl.col(C.EPOCH).cast(pl.Datetime("ms")))
 
 
-Source = Literal["log", "webcam", "tobii", "screen"]
-SourceType = pl.Enum(["log", "webcam", "tobii", "screen"])
+Source = Literal["log", "webcam", "tobii", "screen", "dot"]
+SourceType = pl.Enum(["log", "webcam", "tobii", "screen", "dot"])
 StudyType = pl.Enum([study.value for study in Study.__members__.values()])
+
 
 def _get_tobii_timeline(p: "Participant") -> pl.DataFrame:
     df = p.tobii_gaze_predictions.select("true_time")
@@ -225,6 +236,17 @@ def _get_log_timeline(p: "Participant") -> pl.DataFrame:
     df = df.with_columns(offset=pl.col("epoch") - p.start_time)
     df = df.with_columns(pl.col("offset").cast(pl.Duration("us")))
     return df.drop("epoch").with_row_index("frame")
+
+
+def _get_dot_timeline(p: "Participant") -> pl.DataFrame:
+    df = p.dottest_locations.select("Epoch").with_columns(
+        index=pl.lit(None, pl.UInt8),
+        study=pl.lit(None, StudyType),
+        source=pl.lit("dot", SourceType),
+    )
+    df = df.with_columns(offset=(pl.col("Epoch") - p.start_time))
+    df = df.with_columns(pl.col("offset").cast(pl.Duration("us")))
+    return df.drop("Epoch").with_row_index("frame")
 
 
 def _get_screen_timeline(p: "Participant") -> Optional[pl.DataFrame]:
@@ -292,10 +314,11 @@ def get_timeline(
         "webcam": _get_webcam_timeline,
         "tobii": _get_tobii_timeline,
         "screen": _get_screen_timeline,
+        "dot": _get_dot_timeline,
     }
 
     if sources is Ellipsis:
-        sources = {"log", "screen", "tobii", "webcam"}
+        sources = set(SourceType.categories)
     elif isinstance(sources, str):
         sources = set([sources])
     elif sources is None or len(sources) == 0:
