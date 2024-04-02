@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Optional
 from pathlib import Path
+from io import BytesIO
 from functools import cached_property
 from dataclasses import dataclass, asdict
 from datetime import timedelta, date, datetime, time
@@ -157,7 +158,17 @@ class Participant:
 
     @cached_property
     def tobii_gaze_predictions(self):
-        return ds.read_tobii_gaze_predictions(self.tobii_gaze_predictions_path)
+        if self.pid == 28:
+            # tobii recording for participant 28 is corrupted
+            i, src = 0, BytesIO()
+            with open(self.tobii_gaze_predictions_path, "rb") as fp:
+                while i < 141165:
+                    src.write(fp.readline())
+                    i += 1
+        else:
+            src = self.tobii_gaze_predictions_path
+
+        return ds.read_tobii_gaze_predictions(src)
 
     @cached_property
     def tobii_calibration_points(self):
