@@ -1,67 +1,63 @@
 from typing import TYPE_CHECKING, Optional
-from pathlib import Path as _Path
-from dataclasses import dataclass as _dataclass, asdict as _asdict
-from re import match as _match, search as _search
-from functools import cached_property as _cached_property
+from pathlib import Path
+from functools import cached_property
+from dataclasses import dataclass, asdict
+from datetime import timedelta, date, datetime, time
+from re import match, search
 
-import datetime as _datetime
-
-from . import characteristics as _c, utils as _util, data as _ds
-from .study import Study as _Study
+from . import utils as util, data as ds
+from .study import Study
+from .characteristics import *
+from .adjustments import get_record_offset
 
 if TYPE_CHECKING:
     from os import PathLike
 
 
-# The following are the time adjustments for the start of the screen recording
-# for each participant in the dataset. It is determined manually by visually
-# inspecting the screen recording for notable events such as mouse clicks.
-# The adjustments are in seconds.
-RECORDING_START_TIME_ADJUSTMENTS: dict[int, float] = {
-    1: 5.45 + 0.875
-}
+__all__ = ["Participant"]
 
-@_dataclass(frozen=True, kw_only=True)
+
+@dataclass(frozen=True, kw_only=True)
 class Participant:
-    root: _Path
+    root: Path
     pid: int
     log_id: int
-    date: _datetime.date
-    setting: _c.Setting
+    date: date
+    setting: Setting
     display_width: int
     display_height: int
     screen_width: float
     screen_height: float
-    gender: _c.Gender
+    gender: Gender
     age: int
-    race: _c.Race
-    skin_color: _c.SkinColor
-    eye_color: _c.EyeColor
-    facial_hair: _c.FacialHair
-    vision: _c.Vision
+    race: Race
+    skin_color: SkinColor
+    eye_color: EyeColor
+    facial_hair: FacialHair
+    vision: Vision
     touch_typer: bool
-    handedness: _c.Handedness
-    weather: _c.Weather
-    pointing_device: _c.PointingDevice
+    handedness: Handedness
+    weather: Weather
+    pointing_device: PointingDevice
     notes: str
-    time_of_day: _datetime.time
+    time_of_day: time
     duration: int
-    start_time: _datetime.datetime
+    start_time: datetime
 
     distance_from_screen: float | None = None
-    screen_recording: _datetime.datetime | None = None
-    wall_clock: _datetime.datetime | None = None
+    screen_recording: datetime | None = None
+    wall_clock: datetime | None = None
 
     def __post_init__(self):
         assert self.root, f"{self.root} is not a directory"
         assert isinstance(self.pid, int), f"{self.pid} is not an integer"
-        assert _match(
+        assert match(
             r"P_\d{2}", self.root.name
         ), f"{self.root.name} is not a valid participant directory"
         assert isinstance(self.log_id, int), f"{self.log_id} is not an integer"
-        assert isinstance(self.date, _datetime.date), f"{self.date} is not a date"
+        assert isinstance(self.date, date), f"{self.date} is not a date"
         assert isinstance(
-            self.setting, _c.Setting
+            self.setting, Setting
         ), f"{self.setting} is not a valid setting"
         assert isinstance(
             self.display_width, int
@@ -81,105 +77,111 @@ class Participant:
             ), f"{self.distance_from_screen} is not a float"
         if self.screen_recording is not None:
             assert isinstance(
-                self.screen_recording, _datetime.datetime
+                self.screen_recording, datetime
             ), f"{self.screen_recording} is not a datetime"
         if self.wall_clock is not None:
             assert isinstance(
-                self.wall_clock, _datetime.datetime
+                self.wall_clock, datetime
             ), f"{self.wall_clock} is not a datetime"
 
     @staticmethod
     def get_root(dataset: "PathLike", pid: int):
-        return _Path(dataset).expanduser().resolve() / f"P_{pid:02}"
+        return Path(dataset).expanduser().resolve() / f"P_{pid:02}"
 
     @classmethod
     def create(cls, dataset: Optional["PathLike"] = None, **kwargs):
         return cls(
-            root=cls.get_root(dataset or _util.get_dataset_root(), kwargs["pid"]),
+            root=cls.get_root(dataset or util.get_dataset_root(), kwargs["pid"]),
             **{
-                key: value(kwargs.pop(key)) for key, value in _c.CHARACTERISTICS.items()
+                key: fn(kwargs.pop(key)) for key, fn in CHARACTERISTICS.items()
             },
             **{key: value for key, value in kwargs.items()},
         )
 
-    @_cached_property
+    @cached_property
     def participant_id(self):
         return self.root.name
 
-    @_cached_property
+    @cached_property
     def screen_offset(self):
-        if self.screen_recording is not None:
-            return (
-                self.screen_recording
-                - self.start_time
-                - _datetime.timedelta(
-                    seconds=RECORDING_START_TIME_ADJUSTMENTS.get(self.pid, 0)
-                )
-            )
+        # screen recording value in participant.csv just makes no sense
+        return get_record_offset(self.pid)
 
-    @_cached_property
-    def tobii_offset(self) -> _datetime.timedelta | None:
+    @cached_property
+    def tobii_offset(self) -> timedelta | None:
         return self.tobii_gaze_predictions["true_time"][0] - self.start_time
 
-    @_cached_property
-    def log_offset(self) -> _datetime.timedelta | None:
-        return self.user_interaction_logs["timestamp"][0] - self.start_time
+    @cached_property
+    def log_offset(self) -> timedelta | None:
+        return self.user_interaction_logs["epoch"][0] - self.start_time
 
-    @_cached_property
+    @cached_property
     def tobii_specs_path(self):
         return self.root / "specs.txt"
 
-    @_cached_property
+    @cached_property
     def dottest_locations_path(self):
         return self.root / "final_dot_test_locations.tsv"
 
-    @_cached_property
-    def screen_recording_path(self):
-        return self.root / f"{self.participant_id}.mov"
+    @cached_property
+    def screen_recording_extension(self):
+        match self.setting:
+            case Setting.LAPTOP:
+                return "mov"
+            case Setting.PC:
+                return "flv"
+            case _:
+                return None
 
-    @_cached_property
+    @cached_property
+    def screen_recording_path(self):
+        ext = self.screen_recording_extension
+        assert ext is not None
+        return self.root / f"{self.participant_id}.{ext}"
+
+    @cached_property
     def user_interaction_logs_path(self):
         return self.root / f"{self.log_id}.json"
 
-    @_cached_property
+    @cached_property
     def tobii_gaze_predictions_path(self):
         return self.root / f"{self.participant_id}.txt"
 
-    @_cached_property
+    @cached_property
     def webcam_video_paths(self):
-        return _util.lookup_webcam_video_paths(self.root)
+        return util.lookup_webcam_video_paths(self.root)
 
-    @_cached_property
+    @cached_property
     def user_interaction_logs(self):
-        return _ds.read_user_interaction_logs(self.user_interaction_logs_path)
+        return ds.read_user_interaction_logs(self.user_interaction_logs_path)
 
-    @_cached_property
+    @cached_property
     def tobii_gaze_predictions(self):
-        return _ds.read_tobii_gaze_predictions(self.tobii_gaze_predictions_path)
+        return ds.read_tobii_gaze_predictions(self.tobii_gaze_predictions_path)
 
-    @_cached_property
+    @cached_property
     def tobii_calibration_points(self):
-        return _ds.read_tobii_calibration_points(self.tobii_gaze_predictions_path)
+        return ds.read_tobii_calibration_points(self.tobii_gaze_predictions_path)
 
-    @_cached_property
+    @cached_property
     def dottest_locations(self):
-        return _ds.read_dottest_locations(self.dottest_locations_path)
+        return ds.read_dottest_locations(self.dottest_locations_path)
 
-    @_cached_property
+    @cached_property
     def tobii_specs(self):
-        return _ds.read_tobii_specs(self.tobii_specs_path)
+        return ds.read_tobii_specs(self.tobii_specs_path)
 
-    @_cached_property
+    @cached_property
     def tobii_ilumination_mode(self):
         return self.tobii_specs[1]
 
-    @_cached_property
+    @cached_property
     def tobii_frequency(self):
         return self.tobii_specs[2]
 
     def get_webcam_video_paths(
-        self, *, study: Optional[_Study] = None, index: int | None = None
-    ) -> list[_Path]:
+        self, *, study: Optional[Study] = None, index: int | None = None
+    ) -> list[Path]:
         pattern: str | None = None
         paths = self.webcam_video_paths
 
@@ -193,7 +195,7 @@ class Participant:
             case (None, None):
                 return paths
 
-        return [p for p in paths if _search(pattern, p.name)]
+        return [p for p in paths if search(pattern, p.name)]
 
     def to_dict(self):
-        return _asdict(self)
+        return asdict(self)
