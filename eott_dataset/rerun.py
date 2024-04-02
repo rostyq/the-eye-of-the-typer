@@ -37,6 +37,7 @@ def rerun_log_screen(
     *,
     position: int | None = None,
     size: tuple[int, int] | None = None,
+    convert: int = cv.COLOR_BGR2RGB,
 ):
     if position is not None and position != cap.get(cv.CAP_PROP_POS_FRAMES):
         cap.set(cv.CAP_PROP_POS_FRAMES, position)
@@ -59,14 +60,18 @@ def rerun_log_screen(
     if size is not None:
         image = cv.resize(image, size)
 
-    image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    image = cv.cvtColor(image, convert)
 
     rr.log("screen", rr.Image(image))
     return cap
 
 
 def rerun_log_webcam(
-    cap: cv.VideoCapture, *, name: str | None = None, scale: float = 1.0
+    cap: cv.VideoCapture,
+    *,
+    name: str | None = None,
+    scale: float = 1.0,
+    convert: int = cv.COLOR_BGR2RGB,
 ):
     if name is not None:
         time = cap.get(cv.CAP_PROP_POS_MSEC) / 1_000
@@ -79,7 +84,7 @@ def rerun_log_webcam(
 
     h, w, _ = image.shape
     image = cv.resize(image, (int(w * scale), int(h * scale)))
-    image = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    image = cv.cvtColor(image, convert)
     rr.log("webcam", rr.Image(image))
     return cap
 
