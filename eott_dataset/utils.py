@@ -1,9 +1,14 @@
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from os import PathLike, environ
 from pathlib import Path
-from subprocess import check_output
+from subprocess import check_output, run
 from re import match, search
-from functools import lru_cache
+from functools import lru_cache, cache
+from datetime import timedelta
+
+
+if TYPE_CHECKING:
+    from .participant import Participant
 
 
 __all__ = [
@@ -12,15 +17,12 @@ __all__ = [
     "get_video_fps",
     "lookup_webcam_video_paths",
     "clear_count_video_frames_cache",
+    "get_start_recording_time_offsets"
 ]
 
 
 def get_dataset_root():
-    return (
-        Path(environ.get("EOTT_DATASET_PATH", Path.cwd()))
-        .expanduser()
-        .resolve()
-    )
+    return Path(environ.get("EOTT_DATASET_PATH", Path.cwd())).expanduser().resolve()
 
 
 @lru_cache(maxsize=128)
@@ -98,3 +100,29 @@ def lookup_webcam_video_paths(root: Optional["PathLike"] = None):
 
     return paths
 
+
+def play_screen_recordings_with_mpv(participants: list["Participant"]):
+    args = ["mpv", "--osd-fractions", "--osd-level=2"]
+    for p in participants:
+        path = str(p.screen_recording_path.absolute())
+        run([*args, path], shell=True)
+
+
+def get_start_recording_time_offsets() -> dict[int, timedelta]:
+    import polars as pl
+
+    from .data import read_participant_characteristics
+    from .participant import Participant
+
+    pdf = read_participant_characteristics()
+
+    ps = [Participant.create(**row) for row in pdf.iter_rows(named=True)]
+    ps = [p for p in ps if p.screen_recording_path.exists()]
+
+    schema = {"pid": pl.UInt8, "screen_time": pl.Datetime("us")}
+    df = pl.DataFrame([[p.pid, p.user_interaction_logs["epoch"][0]] for p in ps], schema)
+    df = pdf.join(df.with_columns(pl.col("screen_time").cast(pl.Datetime("ms"))), on="pid")
+    df = df.with_columns(screen_offset=pl.col("screen_time") - pl.col("start_time"))
+    df = df.select("pid", "screen_offset")
+
+    return {pid: offset for pid, offset in df.iter_rows()}
