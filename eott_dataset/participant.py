@@ -89,7 +89,7 @@ class Participant:
         return Path(dataset).expanduser().resolve() / f"P_{pid:02}"
 
     @classmethod
-    def create(cls, dataset: Optional["PathLike"] = None, **kwargs):
+    def from_dict(cls, dataset: Optional["PathLike"] = None, **kwargs):
         return cls(
             root=cls.get_root(dataset or util.get_dataset_root(), kwargs["pid"]),
             **{

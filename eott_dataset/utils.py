@@ -116,7 +116,7 @@ def get_start_recording_time_offsets() -> dict[int, timedelta]:
 
     pdf = read_participant_characteristics()
 
-    ps = [Participant.create(**row) for row in pdf.iter_rows(named=True)]
+    ps = [Participant.from_dict(**row) for row in pdf.iter_rows(named=True)]
     ps = [p for p in ps if p.screen_recording_path.exists()]
 
     schema = {"pid": pl.UInt8, "screen_time": pl.Datetime("us")}
