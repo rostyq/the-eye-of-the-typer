@@ -93,9 +93,7 @@ class Participant:
     def from_dict(cls, dataset: Optional["PathLike"] = None, **kwargs):
         return cls(
             root=cls.get_root(dataset or util.get_dataset_root(), kwargs["pid"]),
-            **{
-                key: fn(kwargs.pop(key)) for key, fn in CHARACTERISTICS.items()
-            },
+            **{key: fn(kwargs.pop(key)) for key, fn in CHARACTERISTICS.items()},
             **{key: value for key, value in kwargs.items()},
         )
 
@@ -158,25 +156,16 @@ class Participant:
 
     @cached_property
     def tobii_gaze_predictions(self):
-        if self.pid == 28:
-            # tobii recording for participant 28 is corrupted
-            i, src = 0, BytesIO()
-            with open(self.tobii_gaze_predictions_path, "rb") as fp:
-                while i < 141165:
-                    src.write(fp.readline())
-                    i += 1
-        else:
-            src = self.tobii_gaze_predictions_path
-
-        return ds.read_tobii_gaze_predictions(src)
+        return ds.read_tobii_gaze_predictions(self.tobii_gaze_predictions_path)
 
     @cached_property
     def tobii_calibration_points(self):
-        return ds.read_tobii_calibration_points(self.tobii_gaze_predictions_path)
+        return ds.read_tobii_calibration_points(self.tobii_specs_path)
 
     @cached_property
     def dottest_locations(self):
-        return ds.read_dottest_locations(self.dottest_locations_path)
+        if self.dottest_locations_path.exists():
+            return ds.read_dottest_locations(self.dottest_locations_path)
 
     @cached_property
     def tobii_specs(self):

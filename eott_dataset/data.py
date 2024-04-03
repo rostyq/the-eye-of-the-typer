@@ -135,11 +135,19 @@ def read_user_interaction_logs(p: PathLike | bytes | IOBase):
     return df.sort(by="epoch")
 
 
-def read_tobii_gaze_predictions(p: PathLike | bytes | IOBase):
+def read_tobii_gaze_predictions(p: PathLike):
     from .schemas import TOBII_SCHEMA as SCHEMA
     from .names import TobiiField as F
 
-    df = pl.read_ndjson(p, ignore_errors=True)
+    try:
+        df = pl.read_ndjson(p)
+    except RuntimeError:
+        # handle corrupted files
+        # polars cannot ignore parsing errors: https://github.com/pola-rs/polars/issues/13768
+        with open(p, "rb") as fp:
+            lines = fp.readlines()
+            df = pl.read_ndjson(b"".join(lines[:-1]))
+        
     df = df.with_columns(pl.col(key).cast(value) for key, value in SCHEMA.items())
     return df.with_columns((pl.col(F.TRUE_TIME) * 1e9).cast(pl.Datetime("ns")))
 
@@ -158,7 +166,7 @@ def read_tobii_calibration_points(p: PathLike):
         ignore_errors=True,
     )
     df = df.drop_nulls()
-    return df.with_columns(pl.col(C.VALIDITY_LEFT) > 1, pl.col(C.VALIDITY_RIGHT) > 1)
+    return df.with_columns(pl.col(C.VALIDITY_LEFT) > 0, pl.col(C.VALIDITY_RIGHT) > 0)
 
 
 def read_tobii_specs(p: PathLike):
@@ -238,8 +246,13 @@ def _get_log_timeline(p: "Participant") -> pl.DataFrame:
     return df.drop("epoch").with_row_index("frame")
 
 
-def _get_dot_timeline(p: "Participant") -> pl.DataFrame:
-    df = p.dottest_locations.select("Epoch").with_columns(
+def _get_dot_timeline(p: "Participant") -> Optional[pl.DataFrame]:
+    df = p.dottest_locations
+
+    if df is None:
+        return None
+
+    df = df.select("Epoch").with_columns(
         index=pl.lit(None, pl.UInt8),
         study=pl.lit(None, StudyType),
         source=pl.lit("dot", SourceType),
@@ -250,7 +263,7 @@ def _get_dot_timeline(p: "Participant") -> pl.DataFrame:
 
 
 def _get_screen_timeline(p: "Participant") -> Optional[pl.DataFrame]:
-    if p.screen_recording is None or not p.screen_recording_path.exists():
+    if not p.screen_recording_path.exists():
         return None
 
     offset = p.screen_offset
