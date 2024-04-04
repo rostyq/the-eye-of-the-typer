@@ -2,9 +2,12 @@ from typing import Optional, TYPE_CHECKING
 from os import PathLike, environ
 from pathlib import Path
 from subprocess import check_output, run
+from contextlib import suppress
 from re import match, search
-from functools import lru_cache, cache
+from functools import lru_cache
 from datetime import timedelta
+from tempfile import mktemp
+from os import remove
 
 
 if TYPE_CHECKING:
@@ -15,9 +18,8 @@ __all__ = [
     "get_dataset_root",
     "count_video_frames",
     "get_video_fps",
-    "lookup_webcam_video_paths",
     "clear_count_video_frames_cache",
-    "get_start_recording_time_offsets"
+    "fix_webcam_video",
 ]
 
 
@@ -75,53 +77,51 @@ def get_video_fps(p: PathLike):
         return float(result)
 
 
-def lookup_webcam_video_paths(root: Optional["PathLike"] = None):
-    from .study import Study
+def fix_webcam_video(p: PathLike) -> bytes:
+    p = Path(p)
+    input_path = str(p.expanduser().absolute())
+    output_path = mktemp(suffix=".mp4", prefix=f"eott_{p.stem}_")
+    try:
+        check_output(
+            ["ffmpeg", "-i", input_path, "-fps_mode", "passthrough", output_path],
+            shell=True,
+        )
+        with open(output_path, "rb") as fp:
+            result = fp.read()
 
-    paths = [
-        path
-        for path in Path(root or get_dataset_root()).glob("**/*.webm")
-        if path.is_file()
-    ]
+    finally:
+        with suppress(FileNotFoundError):
+            remove(output_path)
 
-    def parse_indices(p: Path):
-        pid = p.parent.name.split("_")[1]
-        name = p.name
-        log_id = int(match(r"(\d+)_", name).group(1))
-        index = int(search(r"_(\d+)_", name).group(1))
-        study = search(r"-study-([a-z_]+)[\. ]", name).group(1)
-        study = Study(study).position
-
-        aux = search(r"\((\d+)\)", name)
-        aux = int(aux.group(1)) if aux is not None else 0
-        return pid, log_id, index, study, aux
-
-    paths.sort(key=parse_indices)
-
-    return paths
+    return result
 
 
-def play_screen_recordings_with_mpv(participants: list["Participant"]):
+def play_screen(participants: list["Participant"]):
     args = ["mpv", "--osd-fractions", "--osd-level=2"]
     for p in participants:
-        path = str(p.screen_recording_path.absolute())
+        path = str(p.screen_path.absolute())
         run([*args, path], shell=True)
 
 
-def get_start_recording_time_offsets() -> dict[int, timedelta]:
-    import polars as pl
+def _get_start_recording_time_offsets() -> dict[int, timedelta]:
+    raise NotImplementedError()
 
+    import polars as pl
     from .data import read_participant_characteristics
     from .participant import Participant
 
     pdf = read_participant_characteristics()
 
     ps = [Participant.from_dict(**row) for row in pdf.iter_rows(named=True)]
-    ps = [p for p in ps if p.screen_recording_path.exists()]
+    ps = [p for p in ps if p.screen_path.exists()]
 
     schema = {"pid": pl.UInt8, "screen_time": pl.Datetime("us")}
-    df = pl.DataFrame([[p.pid, p.user_interaction_logs["epoch"][0]] for p in ps], schema)
-    df = pdf.join(df.with_columns(pl.col("screen_time").cast(pl.Datetime("ms"))), on="pid")
+    df = pl.DataFrame(
+        [[p.pid, p.user_interaction_logs["epoch"][0]] for p in ps], schema
+    )
+    df = pdf.join(
+        df.with_columns(pl.col("screen_time").cast(pl.Datetime("ms"))), on="pid"
+    )
     df = df.with_columns(screen_offset=pl.col("screen_time") - pl.col("start_time"))
     df = df.select("pid", "screen_offset")
 

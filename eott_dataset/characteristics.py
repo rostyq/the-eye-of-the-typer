@@ -1,4 +1,4 @@
-from enum import IntEnum as _IntEnum, StrEnum as _StrEnum
+from enum import StrEnum as _StrEnum
 
 
 class Setting(_StrEnum):
@@ -18,12 +18,12 @@ class Race(_StrEnum):
     OTHER = "Other"
 
 
-class SkinColor(_IntEnum):
-    C1 = 1
-    C2 = 2
-    C3 = 3
-    C4 = 4
-    C5 = 5
+class SkinColor(_StrEnum):
+    C1 = "1"
+    C2 = "2"
+    C3 = "3"
+    C4 = "4"
+    C5 = "5"
 
 
 class EyeColor(_StrEnum):
@@ -66,7 +66,7 @@ CHARACTERISTICS = {
     "setting": Setting,
     "gender": Gender,
     "race": Race,
-    "skin_color": lambda x: SkinColor(int(x)),
+    "skin_color": SkinColor,
     "eye_color": EyeColor,
     "facial_hair": FacialHair,
     "vision": Vision,

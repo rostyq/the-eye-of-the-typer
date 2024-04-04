@@ -1,3 +1,5 @@
 polars
 rerun
 opencv-python
+decord
+tqdm
