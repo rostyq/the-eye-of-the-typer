@@ -237,7 +237,7 @@ def tobii_dataframe(src: Path):
         pl.col(F.LEFT_GAZE_POINT_ON_DISPLAY_AREA).arr.to_struct(xy),
         pl.col(F.RIGHT_GAZE_POINT_ON_DISPLAY_AREA).arr.to_struct(xy),
     )
-    return df.select(
+    return df.sort(F.TRUE_TIME).select(
         pid=pl.lit(pid, pl.UInt8),
         timestamp=F.TRUE_TIME,
         clock=F.SYSTEM_TIME_STAMP,
@@ -395,7 +395,7 @@ def dot_dataframe(src: Path):
         ignore_errors=True,
         infer_schema_length=0,
     )
-    return df.select(
+    return df.sort(C.EPOCH).select(
         pid=pl.lit(pid_from_path(src), pl.UInt8),
         timestamp=pl.col(C.EPOCH).cast(pl.Datetime("ms")),
         dot=pl.struct(x=C.DOT_X, y=C.DOT_Y),
