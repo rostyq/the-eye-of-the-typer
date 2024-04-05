@@ -150,6 +150,7 @@ class Type(_Name):
 
 
 class Source(_Name):
+    LOG = _auto()
     MOUSE = _auto()
     SCROLL = _auto()
     INPUT = _auto()
