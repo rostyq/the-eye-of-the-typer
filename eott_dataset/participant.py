@@ -1,5 +1,5 @@
 from pathlib import Path
-from re import match
+from re import match, search
 from os import PathLike
 
 from .utils import get_dataset_root
@@ -10,7 +10,6 @@ from .entries import *
 __all__ = [
     "parse_webcam_filename",
     "pid_from_name",
-    "pid_from_path",
     "glob_webcam_files",
     "glob_specs_files",
     "glob_screen_files",
@@ -21,29 +20,25 @@ __all__ = [
 
 
 def parse_webcam_filename(s: str):
-    from .names import Study
+    from .study import Study
 
     r = match(r"([0-9]+)_([0-9]+)_-study-([a-z_]+)( \(([0-9]+)\))?", s)
     assert r is not None
 
-    log, record, study, _, aux = r.groups()
+    log, index, study, _, aux = r.groups()
 
     log = int(log)
-    record = int(record)
-    study = Study(study).id
+    index = int(index)
+    study = Study(study).position
     aux = int(aux) if aux is not None else 0
 
-    return log, record, study, aux
+    return log, index, study, aux
 
 
 def pid_from_name(s: str):
     m = match(r"P_(\d{2})$", s.strip())
     if m is not None:
         return int(m.group(1))
-
-
-def pid_from_path(p: Path):
-    return pid_from_name(p.parent.name)
 
 
 def _glob_dataset_files(pattern: str, root: PathLike | None = None):
