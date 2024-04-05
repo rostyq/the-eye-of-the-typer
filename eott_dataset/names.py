@@ -1,7 +1,22 @@
 from enum import StrEnum as _StrEnum, auto as _auto
+from functools import cached_property as _cached_property
 
 
-class CharacteristicColumn(_StrEnum):
+class _Name(_StrEnum):
+    @classmethod
+    def from_id(cls, i: int):
+        return cls.__members__[cls._member_names_[i]]
+
+    @classmethod
+    def values(cls):
+        return [item.value for item in cls.__members__.values()]
+
+    @_cached_property
+    def id(self):
+        return self.__class__._member_names_.index(self.name)
+
+
+class CharacteristicColumn(_Name):
     PID = "Participant ID"
     LOG_ID = "Participant Log ID"
     DATE = "Date"
@@ -29,7 +44,7 @@ class CharacteristicColumn(_StrEnum):
     DURATION = "Duration"
 
 
-class LogField(_StrEnum):
+class LogField(_Name):
     SESSION_ID = "sessionId"
     WEBPAGE = "webpage"
     SESSION_STRING = "sessionString"
@@ -56,7 +71,7 @@ class LogField(_StrEnum):
     IS_TRUSTED = "isTrusted"
 
 
-class TobiiField(_StrEnum):
+class TobiiField(_Name):
     RIGHT_PUPIL_VALIDITY = _auto()
     RIGHT_GAZE_POINT_ON_DISPLAY_AREA = _auto()
     LEFT_GAZE_ORIGIN_VALIDITY = _auto()
@@ -78,7 +93,7 @@ class TobiiField(_StrEnum):
     DEVICE_TIME_STAMP = _auto()
 
 
-class SpecColumn(_StrEnum):
+class SpecColumn(_Name):
     VALIDITY_LEFT = _auto()
     VALIDITY_RIGHT = _auto()
     POINT_X = _auto()
@@ -89,7 +104,56 @@ class SpecColumn(_StrEnum):
     PREDICTION_Y_RIGHT = _auto()
 
 
-class DotColumn(_StrEnum):
+class DotColumn(_Name):
     DOT_X = "Dot_X"
     DOT_Y = "Dot_Y"
     EPOCH = "Epoch"
+
+
+class Study(_Name):
+    DOT_TEST_INSTRUCTIONS = _auto()
+    DOT_TEST = _auto()
+    FITTS_LAW_INSTRUCTIONS = _auto()
+    FITTS_LAW = _auto()
+    SERP_INSTRUCTIONS = _auto()
+    BENEFITS_OF_RUNNING_INSTRUCTIONS = _auto()
+    BENEFITS_OF_RUNNING = _auto()
+    BENEFITS_OF_RUNNING_WRITING = _auto()
+    EDUCATIONAL_ADVANTAGES_OF_SOCIAL_NETWORKING_SITES_INSTRUCTIONS = _auto()
+    EDUCATIONAL_ADVANTAGES_OF_SOCIAL_NETWORKING_SITES = _auto()
+    EDUCATIONAL_ADVANTAGES_OF_SOCIAL_NETWORKING_SITES_WRITING = _auto()
+    WHERE_TO_FIND_MOREL_MUSHROOMS_INSTRUCTIONS = _auto()
+    WHERE_TO_FIND_MOREL_MUSHROOMS = _auto()
+    WHERE_TO_FIND_MOREL_MUSHROOMS_WRITING = _auto()
+    TOOTH_ABSCESS_INSTRUCTIONS = _auto()
+    TOOTH_ABSCESS = _auto()
+    TOOTH_ABSCESS_WRITING = _auto()
+    DOT_TEST_FINAL_INSTRUCTIONS = _auto()
+    DOT_TEST_FINAL = _auto()
+    THANK_YOU = _auto()
+
+
+class Event(_Name):
+    VIDEO_START = "video started"
+    VIDEO_STOP = "video stop"
+    VIDEO_SAVE = "video saved"
+
+
+class Type(_Name):
+    SCROLL_EVENT = "scrollEvent"
+    MOUSE_MOVE = "mousemove"
+    MOUSE_CLICK = "mouseclick"
+    TEXT_INPUT = "textInput"
+    TEXT_SUBMIT = "text_input"
+    REC_START = "recording start"
+    REC_STOP = "recording stop"
+
+
+class Source(_Name):
+    MOUSE = _auto()
+    SCROLL = _auto()
+    INPUT = _auto()
+    TEXT = _auto()
+    TOBII = _auto()
+    WEBCAM = _auto()
+    SCREEN = _auto()

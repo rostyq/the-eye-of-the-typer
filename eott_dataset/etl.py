@@ -1,6 +1,9 @@
 from typing import Literal, Callable
+from datetime import datetime
+from os import PathLike, SEEK_END, SEEK_SET, remove
 from io import IOBase
-from os import PathLike, SEEK_END, SEEK_SET
+from tempfile import mktemp
+from contextlib import suppress
 from pathlib import Path
 from re import match
 from io import IOBase
@@ -8,12 +11,7 @@ from enum import StrEnum
 
 import polars as pl
 
-from .study import Study
-
-import polars as pl
-
-from .study import Study
-from .data import *
+from .names import Study
 
 
 ROW_INDEX_COL = "entry"
@@ -105,144 +103,101 @@ def participant_dataframe(p: PathLike | None = None):
     return df
 
 
-def with_pid_and_frame_column(df: pl.LazyFrame, value: int):
-    df = df.with_row_index(name=ROW_INDEX_COL)
-    return df.with_columns(pid=pl.lit(value, pl.UInt8))
-
-
-def _log_df(df: pl.LazyFrame):
-    return df.select("pid", ROW_INDEX_COL, "index", "study", "event", "epoch", "time")
-
-
-def _scroll_df(df: pl.LazyFrame):
-    df = df.filter(event="scroll")
-    return df.select("pid", ROW_INDEX_COL, scroll=pl.struct(x="scroll_x", y="scroll_y"))
-
-
-def _mouse_df(df: pl.LazyFrame):
-    df = df.filter(event="mouse")
-    return df.select(
-        "pid",
-        ROW_INDEX_COL,
-        screen=pl.struct(x="screen_x", y="screen_y"),
-        client=pl.struct(x="client_x", y="client_y"),
-        window=pl.struct(x="window_x", y="window_y"),
-        page=pl.struct(x="page_x", y="page_y"),
-        inner=pl.struct(w="inner_width", h="inner_height"),
-        outer=pl.struct(w="outer_width", h="outer_height"),
-    )
-
-
-def event_dataframes(src: Path, pid: int):
+def _log_df(src: Path):
     from .schemas import LOG_SCHEMA as SCHEMA
-    from .names import LogField as F
+    from .names import LogField as F, Event as E, Type as T, Source as S
+    from .participant import pid_from_path
 
-    event_map = {
-        "recording start": "start",
-        "mousemove": "mouse",
-        "scrollEvent": "scroll",
-        "mouseclick": "click",
-        "recording stop": "stop",
-        "textInput": "text",
-        "text_input": "text",
+    pid = pid_from_path(src)
+
+    type_map = {
+        T.MOUSE_CLICK: "click",
+        T.MOUSE_MOVE: "move",
+        T.REC_START: "start",
+        T.REC_STOP: "stop",
+        T.SCROLL_EVENT: "scroll",
+        T.TEXT_INPUT: "input",
+        T.TEXT_SUBMIT: "text",
     }
 
-    df = pl.read_json(src)
+    df = pl.read_json(
+        src, schema={k: v for k, v in SCHEMA.items()}, infer_schema_length=0
+    ).lazy()
+    df = df.with_columns(
+        pl.col(F.WEBPAGE)
+        .str.strip_prefix("/study/")
+        .str.strip_suffix(".htm")
+        .replace("thankyou", "thank_you")
+        .cast(pl.Enum(Study.values())),
+        pl.col(F.TYPE).cast(pl.Categorical("lexical")),
+        pl.col(F.EVENT).cast(pl.Categorical("lexical")),
+        pl.col(F.SESSION_ID).str.split("_").list.get(0).cast(pl.UInt64),
+        pl.col(F.SESSION_ID)
+        .str.split("_")
+        .list.get(1)
+        .cast(pl.UInt8)
+        .alias(F.SESSION_STRING),
+        pl.col(F.EPOCH).cast(pl.Datetime("ms")),
+        pl.col(F.TIME).cast(pl.Duration("ms")),
+    )
+    df = df.with_columns(
+        pl.when(pl.col(F.TYPE).is_not_null())
+        .then(pl.col(F.TYPE).map_dict(type_map))
+        .when(pl.col(F.EVENT).is_not_null() & pl.col(F.EVENT).eq(E.VIDEO_SAVE))
+        .then(pl.lit("save"))
+        .otherwise(None)
+        .cast(pl.Categorical("lexical"))
+        .alias(F.EVENT),
+        pl.when(
+            pl.col(F.TYPE).is_in([T.REC_START, T.REC_STOP])
+            | pl.col(F.EVENT).is_in([E.VIDEO_START, E.VIDEO_STOP, E.VIDEO_SAVE])
+        )
+        .then(pl.lit(S.WEBCAM))
+        .when(pl.col(F.TYPE).is_in([T.MOUSE_MOVE, T.MOUSE_CLICK]))
+        .then(pl.lit(S.MOUSE))
+        .when(pl.col(F.TYPE) == T.SCROLL_EVENT)
+        .then(pl.lit(S.SCROLL))
+        .when(pl.col(F.TYPE) == T.TEXT_INPUT)
+        .then(pl.lit(S.INPUT))
+        .when(pl.col(F.TYPE) == T.TEXT_SUBMIT)
+        .then(pl.lit(S.TEXT))
+        .otherwise(pl.lit(None))
+        .cast(pl.Categorical("lexical"))
+        .alias(F.TYPE),
+    )
+
+    return df.sort(by=F.EPOCH).select(
+        pid=pl.lit(pid, pl.UInt8),
+        record=F.SESSION_STRING,
+        timestamp=pl.col(F.EPOCH) - pl.col(F.SESSION_ID).cast(pl.Datetime("ms")),
+        study=F.WEBPAGE,
+        event=F.EVENT,
+        source=F.TYPE,
+        trusted=F.IS_TRUSTED,
+        duration=F.TIME,
+        caret=F.POS,
+        text=F.TEXT,
+        page=pl.struct(x=F.PAGE_X, y=F.PAGE_Y),
+        mouse=pl.struct(x=F.SCREEN_X, y=F.SCREEN_Y),
+        scroll=pl.struct(x=F.SCROLL_X, y=F.SCROLL_Y),
+        window=pl.struct(x=F.WINDOW_X, y=F.WINDOW_Y),
+        inner=pl.struct(w=F.WINDOW_INNER_WIDTH, h=F.WINDOW_INNER_HEIGHT),
+        outer=pl.struct(w=F.WINDOW_OUTER_WIDTH, h=F.WINDOW_OUTER_HEIGHT),
+    )
+
+
+def log_dataframe(root: PathLike | None = None):
+    from .participant import glob_log_files as glob_files
 
     with pl.StringCache():
-        df = df.with_columns(
-            (
-                pl.col(key).cast(value[0])
-                if key.value in df.columns
-                else pl.lit(None, value[0]).alias(key)
-            )
-            for key, value in SCHEMA.items()
-        )
-        df = df.with_columns(
-            pl.col(F.SESSION_ID)
-            .str.split("/")
-            .list.get(-1)
-            .replace("thankyou", "thank_you")
-            .cast(pl.Categorical)
-            .alias("study"),
-            pl.col(F.TYPE).map_dict(event_map, return_dtype=pl.Categorical),
-            pl.col(F.SESSION_ID)
-            .str.split("_")
-            .list.get(0)
-            .cast(pl.UInt64)
-            .alias("log_id"),
-            pl.col(F.SESSION_ID)
-            .str.split("_")
-            .list.get(1)
-            .cast(pl.UInt8)
-            .alias("index"),
-            pl.col(F.EPOCH).cast(pl.Datetime("ms")),
-            pl.col(F.TIME).cast(pl.Duration("ms")),
-        )
+        df = pl.concat([_log_df(p) for p in glob_files(root)]).collect()
 
-    df = df.drop(
-        key.value
-        for key, value in SCHEMA.items()
-        if key.value in df.columns and value[1] is None
-    )
-    df = df.rename(
-        {
-            key.value: value[1]
-            for key, value in SCHEMA.items()
-            if key.value in df.columns and value[1] is not None
-        }
-    )
-    df = df.lazy().sort(by="epoch")
-    df = with_pid_and_frame_column(df, pid)
-    return _log_df(df).collect(), _scroll_df(df).collect(), _mouse_df(df).collect()
+    return df
 
 
-def tobii_dataframe(src: Path, pid: int):
+def _tobii_df(src: Path):
     from .schemas import TOBII_SCHEMA as SCHEMA
     from .names import TobiiField as F
-
-    def get_columns():
-        sides = ("left", "right")
-        names = ("pupil", "gaze_origin", "gaze_point")
-        suffixes = (
-            "on_display_area",
-            "in_user_coordinate_system",
-            "validity",
-            "diameter",
-        )
-
-        suffix_rename = {
-            "on_display_area": "display",
-            "in_user_coordinate_system": "ucs",
-        }
-
-        def get_key(name: str, suffix: str):
-            name = name.replace("_", "")
-            suffix = suffix_rename.get(suffix, suffix)
-            return f"{name}_{suffix}"
-
-        def get_value(name: str, suffix: str):
-            return pl.struct(**{side: f"{side}_{name}_{suffix}" for side in sides})
-
-        def check(name: str, suffix: str):
-            match (name, suffix):
-                case ("pupil", s) if "_" in s:
-                    return False
-                case (n, "diameter") if n.startswith("gaze"):
-                    return False
-                case (n, s) if "origin" in n and "display" in s:
-                    return False
-                case (n, s) if "point" in n and "system" in s:
-                    return False
-                case _:
-                    return True
-
-        return {
-            get_key(name, suffix): get_value(name, suffix)
-            for name in names
-            for suffix in suffixes
-            if check(name, suffix)
-        }
 
     # handle corrupted files
     # polars cannot ignore parsing errors: https://github.com/pola-rs/polars/issues/13768
@@ -253,34 +208,58 @@ def tobii_dataframe(src: Path, pid: int):
             src = b"".join(f.readlines()[:-1])
 
     if isinstance(src, Path):
-        df = pl.scan_ndjson(src, infer_schema_length=1)
-    else:
-        df = pl.read_ndjson(src).lazy()
-
-    df = df.with_columns(pl.col(key).cast(value) for key, value in SCHEMA.items())
-    df = df.with_columns((pl.col(F.TRUE_TIME) * 1e9).cast(pl.Datetime("ns")))
-    df = with_pid_and_frame_column(df, pid)
-    df = df.rename(
-        {
-            f"{name}_time_stamp": name.replace("e_s", "es")
-            for name in ("device", "system")
-        }
-    )
-    df = df.with_columns(
-        *(
-            pl.col(key).arr.to_struct(
-                ["x", "y", "z"] if value.width == 3 else ["x", "y"]
-            )
-            for key, value in df.schema.items()
-            if value.base_type() is pl.Array
+        df = pl.scan_ndjson(
+            src, schema=SCHEMA, infer_schema_length=1, ignore_errors=True
         )
+    else:
+        df = pl.read_ndjson(src, schema=SCHEMA, ignore_errors=True).lazy()
+
+    xyz = ("x", "y", "z")
+    xy = ("x", "y")
+
+    df = df.with_columns(
+        pl.col(F.TRUE_TIME).mul(1e9).cast(pl.Datetime("ns")),
+        pl.col(F.DEVICE_TIME_STAMP).cast(pl.Duration("us")),
+        pl.col(F.SYSTEM_TIME_STAMP).cast(pl.Datetime("us")),
+        pl.col(F.LEFT_PUPIL_VALIDITY).cast(pl.Boolean),
+        pl.col(F.RIGHT_PUPIL_VALIDITY).cast(pl.Boolean),
+        pl.col(F.LEFT_GAZE_ORIGIN_VALIDITY).cast(pl.Boolean),
+        pl.col(F.RIGHT_GAZE_ORIGIN_VALIDITY).cast(pl.Boolean),
+        pl.col(F.LEFT_GAZE_POINT_VALIDITY).cast(pl.Boolean),
+        pl.col(F.RIGHT_GAZE_POINT_VALIDITY).cast(pl.Boolean),
+        pl.col(F.LEFT_GAZE_ORIGIN_IN_TRACKBOX_COORDINATE_SYSTEM).arr.to_struct(xyz),
+        pl.col(F.RIGHT_GAZE_ORIGIN_IN_TRACKBOX_COORDINATE_SYSTEM).arr.to_struct(xyz),
+        pl.col(F.LEFT_GAZE_ORIGIN_IN_USER_COORDINATE_SYSTEM).arr.to_struct(xyz),
+        pl.col(F.RIGHT_GAZE_ORIGIN_IN_USER_COORDINATE_SYSTEM).arr.to_struct(xyz),
+        pl.col(F.LEFT_GAZE_POINT_IN_USER_COORDINATE_SYSTEM).arr.to_struct(xyz),
+        pl.col(F.RIGHT_GAZE_POINT_IN_USER_COORDINATE_SYSTEM).arr.to_struct(xyz),
+        pl.col(F.LEFT_GAZE_POINT_ON_DISPLAY_AREA).arr.to_struct(xy),
+        pl.col(F.RIGHT_GAZE_POINT_ON_DISPLAY_AREA).arr.to_struct(xy),
     )
-    return df.select("pid", ROW_INDEX_COL, **get_columns())
+    return df.select(
+        timestamp=F.TRUE_TIME,
+        clock=F.SYSTEM_TIME_STAMP,
+        duration=F.DEVICE_TIME_STAMP,
+        pupil=pl.struct(
+            validity=pl.struct(
+                left=F.LEFT_PUPIL_VALIDITY, right=F.RIGHT_PUPIL_VALIDITY
+            ),
+            diameter=pl.struct(
+                left=F.LEFT_PUPIL_DIAMETER, right=F.RIGHT_PUPIL_DIAMETER
+            ),
+        ),
+    )
 
 
-def webcam_dataframe(root: PathLike | None = None, callback: Callable[[], None] | None = None):
-    from .utils import fix_webcam_video
+def webcam_dataframe(
+    root: PathLike | None = None, callback: Callable[[], None] | None = None
+):
+    from .utils import ffmpeg
     from .participant import parse_webcam_filename, glob_webcam_files, pid_from_name
+
+    if not callable(callback):
+        callback = lambda: None
+
     schema = {
         "pid": pl.UInt8,
         "log": pl.UInt64,
@@ -290,27 +269,78 @@ def webcam_dataframe(root: PathLike | None = None, callback: Callable[[], None] 
         "path": pl.String,
     }
 
-    if not callable(callback):
-        callback = lambda: None
-
     def path_to_row(path: Path):
         pid = pid_from_name(path.parent.name)
         assert pid is not None
 
         log, index, study, aux = parse_webcam_filename(path.stem)
-        study = Study.from_position(study)
+        study = Study.from_index(study)
 
-        return pid, log, index, study, aux, str(path.expanduser().absolute())
+        return pid, log, index, study, aux, str(path)
 
     data = map(path_to_row, glob_webcam_files(root))
     df = pl.LazyFrame(data, schema, orient="row")
 
-    def udf(value: str):
-        result = fix_webcam_video(value)
+    def path_to_video(src: str) -> bytes:
+        try:
+            dst = mktemp(".mp4", f"eott_{Path(src).stem}_")
+            ffmpeg(src, dst, fps_mode="passthrough")
+            with open(dst, "rb") as fp:
+                result = fp.read()
+        finally:
+            with suppress(FileNotFoundError):
+                remove(dst)
         callback()
         return result
 
-    df = df.with_columns(video=pl.col("path").map_elements(udf, pl.Binary))
+    df = df.with_columns(video=pl.col("path").map_elements(path_to_video, pl.Binary))
+    return df.drop("path")
+
+
+def screen_dataframe(
+    root: PathLike | None = None, callback: Callable[[], None] | None = None
+):
+    from .utils import ffmpeg
+    from .participant import glob_screen_files, pid_from_name
+
+    if not callable(callback):
+        callback = lambda: None
+
+    schema = {
+        "pid": pl.UInt8,
+        "path": pl.String,
+    }
+
+    def path_to_row(path: Path):
+        pid = pid_from_name(path.parent.name)
+        assert pid is not None
+        return pid, str(path)
+
+    data = map(path_to_row, glob_screen_files(root))
+    df = pl.LazyFrame(data, schema, orient="row")
+
+    def path_to_video(src: str) -> bytes:
+        p = Path(src)
+
+        if p.suffix == ".flv":
+            params = dict(fps_mode="passthrough")
+        elif p.suffix == ".mov":
+            params = {"filter:v": "fps=25,scale=iw/2:ih/2"}
+        else:
+            params = {}
+
+        try:
+            dst = mktemp(".mp4", f"eott_screen_{p.stem}_")
+            ffmpeg(src, dst, **params)
+            with open(dst, "rb") as fp:
+                result = fp.read()
+        finally:
+            with suppress(FileNotFoundError):
+                remove(dst)
+        callback()
+        return result
+
+    df = df.with_columns(video=pl.col("path").map_elements(path_to_video, pl.Binary))
     return df.drop("path")
 
 
@@ -329,7 +359,7 @@ def dot_dataframe(src: Path, pid: int):
         epoch=pl.col(C.EPOCH).cast(pl.Datetime("ms")),
         dot=pl.struct(x=C.DOT_X, y=C.DOT_Y),
     )
-    return with_pid_and_frame_column(df, pid)
+    return _index_cols(df, pid)
 
 
 def calibration_dataframe(src: Path, pid: int):
@@ -354,7 +384,7 @@ def calibration_dataframe(src: Path, pid: int):
     )
     df = df.drop_nulls()
     df = df.with_columns(pl.col(C.VALIDITY_LEFT) > 0, pl.col(C.VALIDITY_RIGHT) > 0)
-    df = with_pid_and_frame_column(df, pid)
+    df = _index_cols(df, pid)
     return df.select(
         "pid",
         ROW_INDEX_COL,
@@ -415,4 +445,4 @@ def trackbox_dataframe(src: PathLike | bytes | IOBase, pid: int):
     with pl.StringCache():
         df = pl.LazyFrame(data, schema, orient="row")
 
-    return with_pid_and_frame_column(df, pid)
+    return _index_cols(df, pid)
