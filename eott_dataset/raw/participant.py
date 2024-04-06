@@ -21,7 +21,7 @@ __all__ = [
 
 
 def parse_webcam_filename(s: str):
-    from .names import Study
+    from ..characteristics import Study
 
     r = match(r"([0-9]+)_([0-9]+)_-study-([a-z_]+)( \(([0-9]+)\))?", s)
     assert r is not None

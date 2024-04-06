@@ -8,7 +8,7 @@ from enum import StrEnum
 
 import polars as pl
 
-from .names import Study
+from ..characteristics import Study
 
 
 ROW_INDEX_COL = "entry"

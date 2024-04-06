@@ -1,14 +1,48 @@
+from typing import TYPE_CHECKING
 from enum import StrEnum
 from pathlib import Path
 from os import environ
 from functools import cached_property
+from io import TextIOBase
+
+if TYPE_CHECKING:
+    from polars import DataType
 
 
-__all__ = ["Name"]
+__all__ = ["Name", "get_dataset_root", "print_schema"]
 
 
 def get_dataset_root():
     return Path(environ.get("EOTT_DATASET_PATH") or Path.cwd()).expanduser().resolve()
+
+
+def print_schema(
+    name: str,
+    schema: dict[str, "DataType"],
+    /,
+    out: TextIOBase | None = None,
+    *,
+    indent: str = "\t",
+    depth: int = 0,
+):
+    from polars import Struct
+
+    assert indent.isspace() or len(indent) == 0
+    assert depth >= 0
+
+    if depth == 0:
+        print(name, end=":\n", file=out)
+    else:
+        print(end="\n", file=out)
+
+    for field, data_type in schema.items():
+        print(f"{indent * (depth + 1)}{field}:", end="", file=out)
+        if isinstance(data_type, Struct):
+            print_schema(
+                field, data_type.to_schema(), out=out, indent=indent, depth=depth + 1
+            )
+        else:
+            print(f" {data_type}", file=out)
 
 
 class Name(StrEnum):
