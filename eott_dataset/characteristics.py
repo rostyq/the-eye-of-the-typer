@@ -103,6 +103,7 @@ class Source(_Name):
     CALIB: tobii calibration data
     TRACKBOX: tobii tracking box data
     FORM: participant info and characteristics
+    TIMELINE: syncronized event from all data sources
     """
     LOG = _auto()
     MOUSE = _auto()
@@ -116,6 +117,7 @@ class Source(_Name):
     CALIB = _auto()
     TRACKBOX = _auto()
     FORM = _auto()
+    TIMELINE = _auto()
 
 
 CHARACTERISTICS = {

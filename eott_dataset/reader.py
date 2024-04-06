@@ -1,11 +1,12 @@
 from typing import TypeVar, Union, Optional
 from os import PathLike
 from pathlib import Path
-from .utils import get_dataset_root
-from .characteristics import *
 from functools import cache
 
 import polars as pl
+
+from .utils import get_dataset_root
+from .characteristics import *
 
 
 __all__ = ["Reader", "get_participant"]
@@ -57,21 +58,18 @@ class Reader:
         from . import timeline as tl
 
         form, log = self.scan(Source.FORM), self.scan(Source.LOG)
-        names = "record", "study"
 
-        mouse = tl.get_source_timeline(self.scan(Source.MOUSE), form, *names)
-        scroll = tl.get_source_timeline(self.scan(Source.SCROLL), form, *names)
-        text = tl.get_source_timeline(self.scan(Source.TEXT), form, *names)
-        input_ = tl.get_source_timeline(self.scan(Source.INPUT), form, *names)
+        mouse = tl.get_source_timeline(self.scan(Source.MOUSE), form, Source.MOUSE)
+        scroll = tl.get_source_timeline(self.scan(Source.SCROLL), form, Source.SCROLL)
+        text = tl.get_source_timeline(self.scan(Source.TEXT), form, Source.TEXT)
+        input_ = tl.get_source_timeline(self.scan(Source.INPUT), form, Source.INPUT)
 
-        dot = tl.get_source_timeline(self.scan(Source.DOT), form)
+        dot = tl.get_source_timeline(self.scan(Source.DOT), form, Source.DOT)
 
-        screen = self.scan(Source.SCREEN)
-        screen = tl.get_screen_timeline(screen, form)
+        screen = tl.get_screen_timeline(self.scan(Source.SCREEN), form)
+        webcam = tl.get_webcam_timeline(self.scan(Source.WEBCAM), log)
 
-        webcam = self.scan(Source.WEBCAM)
-        webcam = tl.get_webcam_timeline(webcam, log)
+        log = tl.get_source_timeline(self.scan(Source.MOUSE), form, Source.LOG)
 
-        log = tl.get_source_timeline(self.scan(Source.MOUSE), form, *names)
-
-        return pl.concat([log, mouse, scroll, text, input_, dot, screen, webcam])
+        df = pl.concat([log, mouse, scroll, text, input_, dot, screen, webcam]).sort("pid")
+        return df.sort("pid", "offset").fill_null(strategy="forward").fill_null(strategy="backward")

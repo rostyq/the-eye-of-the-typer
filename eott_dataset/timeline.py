@@ -4,6 +4,8 @@ from io import BytesIO
 import polars as pl
 from decord import VideoReader
 
+from .characteristics import Study, Source
+
 
 def get_frame_timestamps(file: bytes):
     vr = VideoReader(BytesIO(file))
@@ -33,17 +35,19 @@ def with_video_to_timestamps(
     return df.explode(name).with_columns(pl.col(name).cast(pl.Duration("ms")))
 
 
-def get_source_timeline(df: pl.LazyFrame, form: pl.LazyFrame):
+def get_source_timeline(df: pl.LazyFrame, form: pl.LazyFrame, source: Source):
     """
     ### Warning!
     For `screen` and `webcam` sources use `get_screen_timeline` and `get_webcam_timeline`.
     """
-    df = df.select("pid", "record", "study", "timestamp")
+    has_records = "record" in df.columns and "study" in df.columns
+    df = df.select(*(("pid", "record", "study") if has_records else ("pid",)), "timestamp")
     df = df.join(form.select("pid", "start_time"), "pid", "left")
     df = df.select(
         "pid",
-        "record",
-        "study",
+        record="record" if has_records else pl.lit(None, pl.UInt8),
+        study="study" if has_records else pl.lit(None, pl.Enum(Study.values())),
+        source=pl.lit(source, pl.Enum(Source.values())),
         index=pl.col("pid").cum_count(),
         offset=pl.col("timestamp") - pl.col("start_time"),
     )
@@ -58,7 +62,8 @@ def get_screen_timeline(screen: pl.LazyFrame, form: pl.LazyFrame):
     df = df.select(
         "pid",
         record=pl.lit(None, pl.UInt8),
-        study=pl.lit(None, pl.Enum),
+        study=pl.lit(None, pl.Enum(Study.values())),
+        source=pl.lit("screen", pl.Enum(Source.values())),
         index=pl.col("pid").cum_count(), offset=pl.col("offset") + pl.col("file")
     )
     return df
@@ -80,6 +85,7 @@ def get_webcam_timeline(webcam: pl.LazyFrame, log: pl.LazyFrame):
         "pid",
         "record",
         "study",
+        source=pl.lit("webcam", pl.Enum(Source.values())),
         index=pl.col("pid").cum_count().over("record"),
         offset=pl.col("timestamp") + pl.col("file") - pl.col("log"),
     )
