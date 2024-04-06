@@ -2,8 +2,8 @@ from pathlib import Path
 from re import match
 from os import PathLike
 
+from ..characteristics import *
 from .utils import get_dataset_root
-from .characteristics import *
 from .entries import *
 
 

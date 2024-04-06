@@ -1,4 +1,6 @@
-from enum import StrEnum as _StrEnum
+from enum import StrEnum as _StrEnum, auto as _auto
+
+from .utils import Name as _Name
 
 
 class Setting(_StrEnum):
@@ -60,6 +62,37 @@ class Weather(_StrEnum):
 class PointingDevice(_StrEnum):
     TRACKPAD = "Trackpad"
     MOUSE = "Mouse"
+
+
+class Source(_Name):
+    """
+    Enumeration class representing different sources of input.
+
+    LOG: log events or unknown entries
+    MOUSE: mouse events
+    SCROLL: scroll events
+    INPUT: text input events
+    TEXT: text submit events
+    TOBII: tobii recording
+    WEBCAM: webcam recording
+    SCREEN: screen recording
+    DOT: dot test entries
+    CALIB: tobii calibration data
+    TRACKBOX: tobii tracking box data
+    FORM: participant info and characteristics
+    """
+    LOG = _auto()
+    MOUSE = _auto()
+    SCROLL = _auto()
+    INPUT = _auto()
+    TEXT = _auto()
+    TOBII = _auto()
+    WEBCAM = _auto()
+    SCREEN = _auto()
+    DOT = _auto()
+    CALIB = _auto()
+    TRACKBOX = _auto()
+    FORM = _auto()
 
 
 CHARACTERISTICS = {

@@ -1,7 +1,7 @@
 import cv2 as cv
 import rerun as rr
 
-from .entries import *
+from .raw.entries import *
 
 
 def rerun_log_tobii(entry: TobiiEntry, *, screen: tuple[int, int]):

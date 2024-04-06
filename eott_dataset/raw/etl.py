@@ -1,12 +1,9 @@
 from typing import Literal, Callable
-from datetime import datetime
 from os import PathLike, SEEK_END, SEEK_SET, remove
-from io import IOBase
 from tempfile import mktemp
 from contextlib import suppress
 from pathlib import Path
 from re import match
-from io import IOBase
 from enum import StrEnum
 
 import polars as pl
@@ -18,7 +15,7 @@ ROW_INDEX_COL = "entry"
 
 
 def participant_dataframe(p: PathLike | None = None):
-    from . import characteristics as c
+    from .. import characteristics as c
     from .names import CharacteristicColumn as F
     from .schemas import PARTICIPANT_CHARACTERISTICS_SCHEMA as SCHEMA
     from .utils import get_dataset_root
@@ -108,8 +105,9 @@ def participant_dataframe(p: PathLike | None = None):
 
 def log_dataframe(src: Path):
     from .schemas import LOG_SCHEMA as SCHEMA
-    from .names import LogField as F, Event as E, Type as T, Source as S
+    from .names import LogField as F, Event as E, Type as T
     from .participant import pid_from_path
+    from ..characteristics import Source as S
 
     type_map = {
         T.MOUSE_CLICK: "click",
@@ -166,8 +164,7 @@ def log_dataframe(src: Path):
         .cast(pl.Categorical("lexical"))
         .alias(F.TYPE),
     )
-    df = df.sort(F.EPOCH)
-    return df.select(
+    return df.sort(F.EPOCH).select(
         pid=pl.lit(pid_from_path(src), pl.UInt8),
         record=F.SESSION_STRING,
         timestamp=pl.col(F.EPOCH),  # - pl.col(F.SESSION_ID).cast(pl.Datetime("ms")),
@@ -301,7 +298,7 @@ def webcam_dataframe(
     schema = {
         "pid": pl.UInt8,
         "log": pl.UInt64,
-        "index": pl.UInt8,
+        "record": pl.UInt8,
         "study": pl.Categorical(),
         "aux": pl.UInt8,
         "path": pl.String,
@@ -331,7 +328,7 @@ def webcam_dataframe(
         callback()
         return result
 
-    df = df.with_columns(video=pl.col("path").map_elements(path_to_video, pl.Binary))
+    df = df.with_columns(file=pl.col("path").map_elements(path_to_video, pl.Binary))
     return df.drop("path")
 
 
@@ -378,7 +375,7 @@ def screen_dataframe(
         callback()
         return result
 
-    df = df.with_columns(video=pl.col("path").map_elements(path_to_video, pl.Binary))
+    df = df.with_columns(file=pl.col("path").map_elements(path_to_video, pl.Binary))
     return df.drop("path")
 
 

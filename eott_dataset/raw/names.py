@@ -1,19 +1,5 @@
-from enum import StrEnum as _StrEnum, auto as _auto
-from functools import cached_property as _cached_property
-
-
-class _Name(_StrEnum):
-    @classmethod
-    def from_id(cls, i: int):
-        return cls.__members__[cls._member_names_[i]]
-
-    @classmethod
-    def values(cls):
-        return [item.value for item in cls.__members__.values()]
-
-    @_cached_property
-    def id(self):
-        return self.__class__._member_names_.index(self.name)
+from enum import auto as _auto
+from ..utils import Name as _Name
 
 
 class CharacteristicColumn(_Name):
@@ -147,14 +133,3 @@ class Type(_Name):
     TEXT_SUBMIT = "text_input"
     REC_START = "recording start"
     REC_STOP = "recording stop"
-
-
-class Source(_Name):
-    LOG = _auto()
-    MOUSE = _auto()
-    SCROLL = _auto()
-    INPUT = _auto()
-    TEXT = _auto()
-    TOBII = _auto()
-    WEBCAM = _auto()
-    SCREEN = _auto()
