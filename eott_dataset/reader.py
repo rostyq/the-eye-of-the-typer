@@ -71,5 +71,14 @@ class Reader:
 
         log = tl.get_source_timeline(self.scan(Source.MOUSE), form, Source.LOG)
 
-        df = pl.concat([log, mouse, scroll, text, input_, dot, screen, webcam]).sort("pid")
-        return df.sort("pid", "offset").fill_null(strategy="forward").fill_null(strategy="backward")
+        df = pl.concat([log, mouse, scroll, text, input_, dot, screen, webcam]).sort(
+            "pid"
+        )
+        return (
+            df.sort("pid", "offset")
+            .fill_null(strategy="forward")
+            .fill_null(strategy="backward")
+        )
+
+    def load(self, pid: int) -> dict[Source, pl.DataFrame]:
+        return {s: self.scan(s).filter(pid=pid).collect() for s in Source.__members__.values()}
