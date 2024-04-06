@@ -1,5 +1,4 @@
-from os import PathLike, environ
-from pathlib import Path
+from os import PathLike
 
 
 __all__ = [
@@ -8,14 +7,6 @@ __all__ = [
     "mpv_play",
     "ffmpeg",
 ]
-
-
-def get_dataset_root():
-    return Path(environ.get("EOTT_DATASET_PATH") or Path.cwd()).expanduser().resolve()
-
-
-def get_output_path():
-    return Path(environ.get("EOTT_OUTPUT_PATH") or Path.cwd()).expanduser().resolve()
 
 
 def ffmpeg(src: PathLike, dst: PathLike | str, **kwargs: str):

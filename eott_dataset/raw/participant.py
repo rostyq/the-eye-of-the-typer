@@ -3,7 +3,7 @@ from re import match
 from os import PathLike
 
 from ..characteristics import *
-from .utils import get_dataset_root
+from ..utils import get_dataset_root
 from .entries import *
 
 

@@ -16,9 +16,9 @@ ROW_INDEX_COL = "entry"
 
 def participant_dataframe(p: PathLike | None = None):
     from .. import characteristics as c
+    from ..utils import get_dataset_root
     from .names import CharacteristicColumn as F
     from .schemas import PARTICIPANT_CHARACTERISTICS_SCHEMA as SCHEMA
-    from .utils import get_dataset_root
     from .adjustments import get_record_offset
 
     p = Path(p) if p is not None else get_dataset_root()

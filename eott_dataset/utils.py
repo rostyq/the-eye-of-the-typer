@@ -1,8 +1,14 @@
 from enum import StrEnum
+from pathlib import Path
+from os import environ
 from functools import cached_property
 
 
 __all__ = ["Name"]
+
+
+def get_dataset_root():
+    return Path(environ.get("EOTT_DATASET_PATH") or Path.cwd()).expanduser().resolve()
 
 
 class Name(StrEnum):
