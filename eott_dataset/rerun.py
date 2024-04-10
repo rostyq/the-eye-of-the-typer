@@ -1,132 +1,123 @@
-import cv2 as cv
+from string import Template
+
 import rerun as rr
 
-from .raw.entries import *
+from .types import *
+from .characteristics import *
+from .participant import Participant
+
+
+RECORDING = Template(
+    """
+Participant $pid
+$start_time
+recording started: $rec_time
+study: $record - $study
+"""
+)
+
+CHARACTERISTICS = Template(
+    """
+age: $age
+gender: $gender
+race: $race
+skin color: $skin_color
+eye color: $eye_color
+facial hair: $facial_hair
+vision: $vision
+touch typer: $touch_typer
+handedness: $handedness
+"""
+)
+
+SETUP = Template(
+    """
+time of day: $time_of_day
+weather: $weather
+setting: $setting
+pointing device: $pointing_device
+screen distance: $screen_distance cm
+screen dimensions: $screen_dim cm
+display resolution: $screen_res
+"""
+)
+
+
+def rerun_log_participant(p: Participant, record: int):
+    rr.log(
+        f"screen",
+        rr.Boxes2D(
+            sizes=[p.screen_res], centers=[tuple(map(lambda v: 0.5 * v, p.screen_res))]
+        ),
+        timeless=True,
+    )
+
+    rr.log(
+        ["pupil", "left"],
+        rr.SeriesLine(name="left pupil diameter", color=(255, 255, 0), width=1),
+        timeless=True,
+    )
+    rr.log(
+        ["pupil", "right"],
+        rr.SeriesLine(name="right pupil diameter", color=(255, 0, 255), width=1),
+        timeless=True,
+    )
+
+    txt = RECORDING.substitute(
+        pid=p.pid,
+        start_time=str(p.start_time),
+        rec_time=str(p.rec_time),
+        record=record,
+        study=p.data[Source.WEBCAM].filter(record=record, aux=0)["study"][0]
+    )
+    rr.log("recording", rr.TextDocument(txt), timeless=True)
+
+    txt = CHARACTERISTICS.substitute(
+        age=p.age,
+        gender=p.gender,
+        race=p.race,
+        skin_color=p.skin_color,
+        eye_color=p.eye_color,
+        facial_hair=p.facial_hair,
+        vision=p.vision,
+        touch_typer=p.touch_typer,
+        handedness=p.handedness,
+    )
+    rr.log("characteristics", rr.TextDocument(txt), timeless=True)
+
+    txt = SETUP.substitute(
+        time_of_day=str(p.time_of_day),
+        weather=p.weather,
+        setting=p.setting,
+        pointing_device=p.pointing_device,
+        screen_distance="%.1f" % p.screen_distance,
+        screen_dim="%.1f x %.1f" % p.screen_dim,
+        screen_res="%d x %d" % p.screen_res,
+    )
+    rr.log("setup", rr.TextDocument(txt), timeless=True)
 
 
 def rerun_log_tobii(entry: TobiiEntry, *, screen: tuple[int, int]):
     sw, sh = screen
-    for eye in ("left", "right"):
-        if entry[f"{eye}_gaze_point_validity"]:
-            x, y = entry[f"{eye}_gaze_point_on_display_area"]
-            rr.log(
-                f"screen/gazepoint/{eye}/tobii",
-                rr.Points2D(
-                    [[x * sw, y * sh]],
-                    colors=[[0, 0, 255]],
-                    radii=[1],
-                ),
-            )
+    for side in ("left", "right"):
+        if entry["gazepoint_validity"][side]:
+            point = entry["gazepoint_display"][side]
+            positions = [[point["x"] * sw, point["y"] * sh]]
+            entity = rr.Points2D(positions, colors=[(0, 0, 255)], radii=[5])
         else:
-            rr.log(
-                f"screen/gazepoint/{eye}/tobii",
-                rr.Clear(recursive=True),
-            )
+            entity = rr.Clear(recursive=True)
+        rr.log(["screen", "gaze", side], entity)
 
-        if entry[f"{eye}_pupil_validity"] and entry[f"{eye}_pupil_diameter"] > 0:
-            rr.log(
-                f"participant/pupil/{eye}/tobii",
-                rr.Scalar(entry[f"{eye}_pupil_diameter"]),
-            )
+        if entry["pupil_diameter"][side] > 0:
+            entity = rr.Scalar(entry["pupil_diameter"][side])
         else:
-            rr.log(f"participant/pupil/{eye}/tobii", rr.Clear(recursive=True))
+            entity = rr.Clear(recursive=True)
+        rr.log(["pupil", side], entity)
 
 
-def rerun_log_screen(
-    cap: cv.VideoCapture,
-    *,
-    position: int | None = None,
-    size: tuple[int, int] | None = None,
-    convert: int = cv.COLOR_BGR2RGB,
-):
-    if position is not None and position != cap.get(cv.CAP_PROP_POS_FRAMES):
-        cap.set(cv.CAP_PROP_POS_FRAMES, position)
-        rr.log(
-            "log/event",
-            rr.TextLog(f"screen frame skip", level=rr.TextLogLevel.WARN),
-        )
-
-    rr.set_time_sequence("screen_index", int(cap.get(cv.CAP_PROP_POS_FRAMES)))
-    rr.set_time_seconds("screen_time", cap.get(cv.CAP_PROP_POS_MSEC) / 1_000)
-
-    success, image = cap.read()
-
-    if not success:
-        return cap.release()
-
-    if position % 10 != 0:
-        return cap
-
-    if size is not None:
-        image = cv.resize(image, size)
-
-    image = cv.cvtColor(image, convert)
-
-    rr.log("screen", rr.Image(image))
-    return cap
-
-
-def rerun_log_webcam(
-    cap: cv.VideoCapture,
-    *,
-    name: str | None = None,
-    scale: float = 1.0,
-    convert: int = cv.COLOR_BGR2RGB,
-):
-    if name is not None:
-        time = cap.get(cv.CAP_PROP_POS_MSEC) / 1_000
-        rr.set_time_seconds(f"{name}_time", time)
-
-    success, image = cap.read()
-
-    if not success:
-        return cap.release()
-
-    h, w, _ = image.shape
-    image = cv.resize(image, (int(w * scale), int(h * scale)))
-    image = cv.cvtColor(image, convert)
-    rr.log("webcam", rr.Image(image))
-    return cap
-
-
-def rerun_log_user(entry: LogEntry, scale: float = 1.0, index: int | None = None):
-    event_type = entry["event"]
-    study_name = entry["study"]
-
-    match event_type:
-        case "start" | "stop":
-            rr.log(
-                "log/event",
-                rr.TextLog(
-                    f"recording {event_type} {study_name} ({index})",
-                    level=rr.TextLogLevel.INFO,
-                ),
-            )
-
-        case "click":
-            rr.log(
-                "log/event",
-                rr.TextLog("mouse click", level=rr.TextLogLevel.DEBUG),
-            )
-
-        case "scroll":
-            # rr.log(
-            #     "log/event",
-            #     rr.TextLog("mouse scroll", level=rr.TextLogLevel.TRACE),
-            # )
-            pass
-
-        case "mouse":
-            screen_x, screen_y = entry["screen_x"], entry["screen_y"]
-            # rr.log(
-            #     "log/event",
-            #     rr.TextLog("mouse move", level=rr.TextLogLevel.TRACE),
-            # )
-            rr.log(
-                "screen/mouse",
-                rr.Points2D(
-                    [[screen_x * scale, screen_y * scale]],
-                    colors=[(255, 255, 0)],
-                    radii=[1],
-                ),
-            )
+def rerun_log_mouse(entry: MouseEntry):
+    point = entry["mouse"]
+    positions = [(point["x"], point["y"])]
+    color = (255, 0, 0) if entry["event"] == "click" else (255, 255, 0)
+    entity = rr.Points2D(positions, colors=[color], radii=[5])
+    rr.log(["screen", "mouse"], entity)
