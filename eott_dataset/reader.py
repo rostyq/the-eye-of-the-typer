@@ -7,6 +7,7 @@ import polars as pl
 
 from .utils import get_dataset_root
 from .characteristics import *
+from .participant import Participant
 
 
 __all__ = ["Reader", "get_participant"]
@@ -57,28 +58,36 @@ class Reader:
     def timeline(self):
         from . import timeline as tl
 
-        form, log = self.scan(Source.FORM), self.scan(Source.LOG)
+        form, log = self.scan(Source.FORM), self.read(Source.LOG)
 
-        mouse = tl.get_source_timeline(self.scan(Source.MOUSE), form, Source.MOUSE)
-        scroll = tl.get_source_timeline(self.scan(Source.SCROLL), form, Source.SCROLL)
-        text = tl.get_source_timeline(self.scan(Source.TEXT), form, Source.TEXT)
-        input_ = tl.get_source_timeline(self.scan(Source.INPUT), form, Source.INPUT)
-
-        dot = tl.get_source_timeline(self.scan(Source.DOT), form, Source.DOT)
-
-        screen = tl.get_screen_timeline(self.scan(Source.SCREEN), form)
-        webcam = tl.get_webcam_timeline(self.scan(Source.WEBCAM), log)
-
-        log = tl.get_source_timeline(self.scan(Source.MOUSE), form, Source.LOG)
-
-        df = pl.concat([log, mouse, scroll, text, input_, dot, screen, webcam]).sort(
-            "pid"
+        df = pl.concat(
+            [
+                tl.get_source_timeline(log.lazy(), form, Source.LOG),
+                tl.get_source_timeline(self.scan(Source.TOBII), form, Source.TOBII),
+                tl.get_source_timeline(self.scan(Source.MOUSE), form, Source.MOUSE),
+                tl.get_source_timeline(self.scan(Source.SCROLL), form, Source.SCROLL),
+                tl.get_source_timeline(self.scan(Source.TEXT), form, Source.TEXT),
+                tl.get_source_timeline(self.scan(Source.INPUT), form, Source.INPUT),
+                tl.get_source_timeline(self.scan(Source.DOT), form, Source.DOT),
+                tl.get_screen_timeline(self.scan(Source.SCREEN), form),
+                tl.get_webcam_timeline(self.scan(Source.WEBCAM), log.lazy()),
+            ]
         )
-        return (
-            df.sort("pid", "offset")
-            .fill_null(strategy="forward")
-            .fill_null(strategy="backward")
-        )
+        return df.sort("pid", "offset").fill_null(strategy="forward")
 
     def load(self, pid: int) -> dict[Source, pl.DataFrame]:
-        return {s: self.scan(s).filter(pid=pid).collect() for s in Source.__members__.values()}
+        return {
+            s: self.scan(s).filter(pid=pid).drop("pid").collect()
+            for s in Source.__members__.values()
+        }
+
+    def participant(self, pid: int) -> Participant:
+        data = self.load(pid)
+
+        form = data.pop(Source.FORM).row(0, named=True)
+        form.update(pid=pid)
+
+        screen = data.pop(Source.SCREEN)
+        screen = screen["file"][0] if len(screen) >= 1 else None
+
+        return Participant(form=form, screen=screen, data=data)
