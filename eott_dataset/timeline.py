@@ -41,15 +41,19 @@ def get_source_timeline(df: pl.LazyFrame, form: pl.LazyFrame, source: Source):
     For `screen` and `webcam` sources use `get_screen_timeline` and `get_webcam_timeline`.
     """
     has_records = "record" in df.columns and "study" in df.columns
-    df = df.select(*(("pid", "record", "study") if has_records else ("pid",)), "timestamp")
-    df = df.join(form.select("pid", "start_time"), "pid", "left")
+    df = df.select(
+        *(("pid", "record", "study") if has_records else ("pid",)), "timestamp"
+    )
+    df = df.join(form.select("pid", "start_time"), on="pid", how="left")
+    df = df.with_columns(timestamp=pl.col("timestamp") - pl.col("start_time"))
+    df = df.sort("pid", "timestamp")
     df = df.select(
         "pid",
         record="record" if has_records else pl.lit(None, pl.UInt8),
         study="study" if has_records else pl.lit(None, pl.Enum(Study.values())),
         source=pl.lit(source, pl.Enum(Source.values())),
-        index=pl.col("pid").cum_count(),
-        offset=pl.col("timestamp") - pl.col("start_time"),
+        index=pl.col("pid").cum_count().over("pid") - 1,
+        offset="timestamp",
     )
     return df
 
@@ -64,7 +68,8 @@ def get_screen_timeline(screen: pl.LazyFrame, form: pl.LazyFrame):
         record=pl.lit(None, pl.UInt8),
         study=pl.lit(None, pl.Enum(Study.values())),
         source=pl.lit("screen", pl.Enum(Source.values())),
-        index=pl.col("pid").cum_count(), offset=pl.col("offset") + pl.col("file")
+        index=pl.col("pid").cum_count().over("pid") - 1,
+        offset=pl.col("offset") + pl.col("file"),
     )
     return df
 
@@ -86,7 +91,7 @@ def get_webcam_timeline(webcam: pl.LazyFrame, log: pl.LazyFrame):
         "record",
         "study",
         source=pl.lit("webcam", pl.Enum(Source.values())),
-        index=pl.col("pid").cum_count().over("record"),
+        index=pl.col("pid").cum_count().over("pid", "record") - 1,
         offset=pl.col("timestamp") + pl.col("file") - pl.col("log"),
     )
     return df
