@@ -160,6 +160,7 @@ class TimelineEntry(TypedDict):
     source: SourceType
     index: int
     offset: timedelta
+    frame: int
 
 
 class BoundingPart(TypedDict):
