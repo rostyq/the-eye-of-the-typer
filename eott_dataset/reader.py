@@ -60,7 +60,7 @@ class Reader:
 
         form, log = self.scan(Source.FORM), self.read(Source.LOG)
 
-        df = pl.concat(
+        lf = pl.concat(
             [
                 tl.get_source_timeline(log.lazy(), form, Source.LOG),
                 tl.get_source_timeline(self.scan(Source.TOBII), form, Source.TOBII),
@@ -73,7 +73,14 @@ class Reader:
                 tl.get_webcam_timeline(self.scan(Source.WEBCAM), log.lazy()),
             ]
         )
-        return df.sort("pid", "offset").fill_null(strategy="forward")
+
+        lf = lf.sort("pid", "offset")
+        lf = lf.with_columns(pl.col("record", "study").forward_fill().over("pid"))
+
+        lf = lf.with_columns(frame=pl.when(source="webcam").then(pl.col("index")).otherwise(None))
+        lf = lf.with_columns(pl.col("frame").forward_fill().over("pid", "record"))
+
+        return lf
 
     def load(self, pid: int) -> dict[Source, pl.DataFrame]:
         return {
