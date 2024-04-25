@@ -6,6 +6,7 @@ from functools import cache
 import polars as pl
 
 from .utils import get_dataset_root
+from .types import SourceType
 from .characteristics import *
 from .participant import Participant
 
@@ -31,10 +32,10 @@ class Reader:
         self.root = Path(root) if root is not None else get_dataset_root()
 
     @cache
-    def filename(self, source: Source):
+    def filename(self, source: Source | SourceType):
         return self.root.joinpath(source).with_suffix(SUFFIX)
 
-    def describe(self, *sources: Source):
+    def describe(self, *sources: Source | SourceType):
         it = self.root.glob(f"*.{EXTENSION}")
         it = filter(lambda p: p.stem in Source.values(), it)
         it = map(lambda p: (Source(p.stem), p), it)
@@ -52,7 +53,7 @@ class Reader:
     ):
         return pl.read_parquet(self.filename(source), columns=columns, **kwargs)
 
-    def scan(self, source: Source, /, *, cache: bool = True, **kwargs):
+    def scan(self, source: Source | SourceType, /, *, cache: bool = True, **kwargs):
         return pl.scan_parquet(self.filename(source), cache=cache, **kwargs)
 
     def timeline(self):
