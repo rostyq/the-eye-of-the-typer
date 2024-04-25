@@ -179,6 +179,14 @@ class FrameEntry(TypedDict):
     time: float
 
 
+class WebcamEntry(TypedDict):
+    pid: int
+    record: int
+    study: StudyType
+    aux: int
+    file: bytes
+
+
 class TimelineItem(TimelineEntry):
     data: Union[
         FrameEntry,
