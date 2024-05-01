@@ -99,3 +99,19 @@ class Reader:
         screen = screen["file"][0] if len(screen) >= 1 else None
 
         return Participant(form=form, screen=screen, data=data)
+
+    @staticmethod
+    def _extract_videofile(lf: pl.LazyFrame, dst: Path):
+        payload = lf.collect()["file"][0]
+
+        with Path(dst).open("wb") as f:
+            f.write(payload)
+
+    def extract_screen_recording(self, dst: Path, /, pid: int):
+        lf = pl.scan_parquet(self.filename(Source.SCREEN)).filter(pid=pid)
+        Reader._extract_videofile(lf, dst)
+
+    def extract_webcam_recording(self, dst: Path, /, pid: int, record: int, aux: int = 0):
+        lf = pl.scan_parquet(self.filename(Source.WEBCAM))
+        lf = lf.filter(pid=pid, record=record, aux=aux)
+        Reader._extract_videofile(lf, dst)
