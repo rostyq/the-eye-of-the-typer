@@ -78,7 +78,9 @@ class Reader:
         lf = lf.sort("pid", "offset")
         lf = lf.with_columns(pl.col("record", "study").forward_fill().over("pid"))
 
-        lf = lf.with_columns(frame=pl.when(source="webcam").then(pl.col("index")).otherwise(None))
+        lf = lf.with_columns(
+            frame=pl.when(source="webcam").then(pl.col("index")).otherwise(None)
+        )
         lf = lf.with_columns(pl.col("frame").forward_fill().over("pid", "record"))
 
         return lf
@@ -108,10 +110,22 @@ class Reader:
             f.write(payload)
 
     def extract_screen_recording(self, dst: Path, /, pid: int):
-        lf = pl.scan_parquet(self.filename(Source.SCREEN)).filter(pid=pid)
+        lf = pl.scan_parquet(
+            self.filename(Source.SCREEN),
+            use_statistics=False,
+            cache=False,
+            low_memory=True,
+        ).filter(pid=pid)
         Reader._extract_videofile(lf, dst)
 
-    def extract_webcam_recording(self, dst: Path, /, pid: int, record: int, aux: int = 0):
-        lf = pl.scan_parquet(self.filename(Source.WEBCAM))
+    def extract_webcam_recording(
+        self, dst: Path, /, pid: int, record: int, aux: int = 0
+    ):
+        lf = pl.scan_parquet(
+            self.filename(Source.WEBCAM),
+            use_statistics=False,
+            cache=False,
+            low_memory=True,
+        )
         lf = lf.filter(pid=pid, record=record, aux=aux)
         Reader._extract_videofile(lf, dst)
