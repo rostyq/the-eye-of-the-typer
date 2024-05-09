@@ -102,7 +102,7 @@ class Reader:
 
     @staticmethod
     def _extract_videofile(lf: pl.LazyFrame, dst: Path):
-        payload = lf.collect()["file"][0]
+        payload = lf.first().collect()["file"][0]
 
         with Path(dst).open("wb") as f:
             f.write(payload)
