@@ -37,7 +37,7 @@ PARTICIPANT_CHARACTERISTICS_SCHEMA: dict[_Char, tuple[type, str]] = {
     _Char.DURATION: (_pl.String, "duration"),
 }
 
-LOG_SCHEMA: dict[_Log, type[_pl.PolarsDataType]] = {
+LOG_SCHEMA: dict[_Log, _pl.PolarsDataType] = {
     _Log.IS_TRUSTED: _pl.Boolean,
     _Log.SESSION_ID: _pl.String,
     _Log.WEBPAGE: _pl.String,
@@ -64,7 +64,7 @@ LOG_SCHEMA: dict[_Log, type[_pl.PolarsDataType]] = {
     _Log.WINDOW_OUTER_HEIGHT: _pl.UInt16,
 }
 
-TOBII_SCHEMA: dict[_Tobii, type[_pl.PolarsDataType]] = {
+TOBII_SCHEMA: dict[_Tobii, _pl.PolarsDataType] = {
     _Tobii.DEVICE_TIME_STAMP: _pl.UInt64,
     _Tobii.SYSTEM_TIME_STAMP: _pl.UInt64,
     _Tobii.TRUE_TIME: _pl.Float64,

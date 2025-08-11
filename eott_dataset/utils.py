@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 from enum import StrEnum
 from pathlib import Path
 from os import environ
@@ -6,7 +6,7 @@ from functools import cached_property
 from io import TextIOBase
 
 if TYPE_CHECKING:
-    from polars import DataType
+    from polars import PolarsDataType
 
 
 __all__ = ["Name", "get_dataset_root", "print_schema"]
@@ -18,7 +18,7 @@ def get_dataset_root():
 
 def print_schema(
     name: str,
-    schema: dict[str, "DataType"],
+    schema: Mapping[str, "PolarsDataType"],
     /,
     out: TextIOBase | None = None,
     *,

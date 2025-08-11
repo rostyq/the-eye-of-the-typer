@@ -16,7 +16,7 @@ study: $record - $study
 """
 )
 
-CHARACTERISTICS = Template(
+CHARS = Template(
     """
 age: $age
 gender: $gender
@@ -72,7 +72,7 @@ def rerun_log_participant(p: Participant, record: int):
     )
     rr.log("recording", rr.TextDocument(txt), timeless=True)
 
-    txt = CHARACTERISTICS.substitute(
+    txt = CHARS.substitute(
         age=p.age,
         gender=p.gender,
         race=p.race,

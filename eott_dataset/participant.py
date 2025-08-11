@@ -1,4 +1,4 @@
-from typing import Generator, cast
+from typing import Generator, cast, Any
 from io import BytesIO
 from datetime import datetime, time
 
@@ -48,7 +48,7 @@ class Participant:
     def __init__(
         self,
         *,
-        form: dict[str],
+        form: dict[str, Any],
         screen: bytes | None = None,
         data: dict[Source, DataFrame] = {},
     ):
@@ -74,10 +74,10 @@ class Participant:
 
         self.screen_distance = float(form.pop("screen_distance"))
 
-        self.screen_dim = form.pop("screen")
-        self.screen_dim = float(self.screen_dim["w"]), float(self.screen_dim["h"])
-        self.screen_res = form.pop("display")
-        self.screen_res = int(self.screen_res["w"]), int(self.screen_res["h"])
+        screen_dim: dict[Literal["w", "h"], Any] = form.pop("screen")
+        self.screen_dim = float(screen_dim["w"]), float(screen_dim["h"])
+        screen_res: dict[Literal["w", "h"], Any] = form.pop("display")
+        self.screen_res = int(screen_res["w"]), int(screen_res["h"])
         self.screen_rec = screen
 
         self.data = data
@@ -103,16 +103,15 @@ class Participant:
 
             timeline = self.data[Source.TIMELINE].filter(*predicates, **constraints)
 
-            entry: TimelineEntry
-            for entry in timeline.iter_rows(named=True):
+            for entry in map(lambda x: cast(TimelineEntry, x), timeline.iter_rows(named=True)):
                 source, record, index = entry["source"], entry["record"], entry["index"]
                 match source:
                     case (
                         "mouse" | "scroll" | "text" | "input" | "dot" | "log" | "tobii"
                     ):
-                        data = self.get_entry(source, index)
+                        data = self.get_entry(Source(source), index)
 
-                    case "screen":
+                    case "screen" if sr is not None:
                         frame_array: NDArray = sr[index]
                         frame_timestamp = float(sr.get_frame_timestamp(index)[0])
                         frame_timestamp = timedelta(seconds=frame_timestamp)
@@ -142,8 +141,7 @@ class Participant:
                     case _:
                         raise ValueError(f"Unexpected source: {source}")
 
-                entry.update(data=data)
-                yield entry
+                yield cast(TimelineItem, {**entry, "data": data})
 
         finally:
             del sr, wr, ctx

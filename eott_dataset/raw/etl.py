@@ -1,4 +1,4 @@
-from typing import Literal, Callable
+from typing import Literal, Callable, cast, Any
 from os import PathLike, SEEK_END, SEEK_SET, remove
 from tempfile import mktemp
 from contextlib import suppress
@@ -120,7 +120,7 @@ def log_dataframe(src: Path):
     }
 
     df = pl.read_json(
-        src, schema={k: v for k, v in SCHEMA.items()}, infer_schema_length=0
+        src, schema={str(k): v for k, v in SCHEMA.items()}, infer_schema_length=0
     ).lazy()
     df = df.with_columns(
         pl.col(F.WEBPAGE)
@@ -199,15 +199,19 @@ def tobii_dataframe(src: Path):
 
     # handle corrupted files
     # polars cannot ignore parsing errors: https://github.com/pola-rs/polars/issues/13768
+    data = None
     with open(src, "rb") as f:
         f.seek(-2, SEEK_END)
         if f.peek(2) != b"}\n":
             f.seek(0, SEEK_SET)
-            src = b"".join(f.readlines()[:-1])
+            data = b"".join(f.readlines()[:-1]).decode()
 
     if isinstance(src, Path):
         df = pl.scan_ndjson(
-            src, schema=SCHEMA, infer_schema_length=1, ignore_errors=True
+            data or src,
+            schema={str(k): v for k, v in SCHEMA.items()},
+            infer_schema_length=1,
+            ignore_errors=True,
         )
     else:
         df = pl.read_ndjson(src, schema=SCHEMA, ignore_errors=True).lazy()
@@ -287,7 +291,7 @@ def tobii_dataset(*, root: PathLike | None = None):
 
 
 def webcam_dataframe(
-    root: PathLike | None = None, callback: Callable[[], None] | None = None
+    root: PathLike | None = None, callback: Callable[[], Any] | None = None
 ):
     from .utils import ffmpeg
     from .participant import parse_webcam_filename, glob_webcam_files, pid_from_name
@@ -317,9 +321,10 @@ def webcam_dataframe(
     df = pl.LazyFrame(data, schema, orient="row")
 
     def path_to_video(src: str) -> bytes:
+        p = Path(src)
         try:
-            dst = mktemp(".mp4", f"eott_{Path(src).stem}_")
-            ffmpeg(src, dst, fps_mode="passthrough")
+            dst = mktemp(".mp4", f"eott_{p.stem}_")
+            ffmpeg(p, dst, fps_mode="passthrough")
             with open(dst, "rb") as fp:
                 result = fp.read()
         finally:
@@ -333,7 +338,7 @@ def webcam_dataframe(
 
 
 def screen_dataframe(
-    root: PathLike | None = None, callback: Callable[[], None] | None = None
+    root: PathLike | None = None, callback: Callable[[], Any] | None = None
 ):
     from .utils import ffmpeg
     from .participant import glob_screen_files, pid_from_name
@@ -366,7 +371,7 @@ def screen_dataframe(
 
         try:
             dst = mktemp(".mp4", f"eott_screen_{p.stem}_")
-            ffmpeg(src, dst, **params)
+            ffmpeg(p, dst, **params)
             with open(dst, "rb") as fp:
                 result = fp.read()
         finally:
@@ -411,13 +416,13 @@ def calibration_dataframe(src: Path):
     from .participant import pid_from_path
 
     def xy(name: str):
-        return pl.struct(**{c: f"{name}_{c}" for c in ("x", "y")})
+        return pl.struct(x=pl.col(f"{name}_x"), y=pl.col(f"{name}_y"))
 
     def lr(name: str):
-        return pl.struct(**{c: f"{name}_{c}" for c in ("left", "right")})
+        return pl.struct(left=pl.col(f"{name}_left"), right=pl.col(f"{name}_right"))
 
     def pred(name: str):
-        return pl.struct(**{c: f"prediction_{c}_{name}" for c in ("x", "y")})
+        return pl.struct(x=pl.col(f"prediction_x_{name}"), y=pl.col(f"prediction_y_{name}"))
 
     df = pl.scan_csv(
         src,
@@ -442,16 +447,15 @@ def calibration_dataset(root: PathLike | None = None):
 
     return pl.concat(map(calibration_dataframe, glob_specs_files(root)))
 
+Key = tuple[
+        Literal["back", "front"],
+        Literal["lower", "upper"],
+        Literal["left", "right"],
+    ]
+Value = tuple[float, float, float]
 
 def read_tobii_specs(p: PathLike):
-    tracking_box: dict[
-        tuple[
-            Literal["back", "front"],
-            Literal["lower", "upper"],
-            Literal["left", "right"],
-        ],
-        tuple[float, float, float],
-    ] = {}
+    tracking_box: dict[Key, Value] = {}
     ilumination_mode: str | None = None
     frequency: float | None = None
 
@@ -459,7 +463,7 @@ def read_tobii_specs(p: PathLike):
         for line in file:
             m = match(r"(Back|Front) (Lower|Upper) (Left|Right):", line)
             if m is not None:
-                index = (m.group(1).lower(), m.group(2).lower(), m.group(3).lower())
+                index = cast(Key, (m.group(1).lower(), m.group(2).lower(), m.group(3).lower()))
 
                 values = line[m.end() :].strip(" ()\n\t").split(", ")
                 x, y, z = [float(v) for v in values]
