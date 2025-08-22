@@ -25,6 +25,7 @@ from rerun import (
     send_columns,
     log,
 )
+from rerun.components import Color
 
 if TYPE_CHECKING:
     from . import FormEntry, DirDataset
@@ -40,7 +41,7 @@ __all__ = [
 ]
 
 TCOLS = ["timestamp", "rec_time", "webcam_time", "screen_time"]
-COLOR_DTYPE = Array(UInt8, 4)
+COLOR_DTYPE = Array(UInt8, 3)
 
 
 def with_timelines(
@@ -108,16 +109,22 @@ def log_events(
         .drop("source")
         .select(*TCOLS, "event", col("mouse").struct.unnest())
         .with_columns(
-            mouse=concat_arr(["x", "y"]), color=lit((255, 255, 0, 0), dtype=COLOR_DTYPE)
+            mouse=concat_arr(["x", "y"]),
+            color=when(col("event") == "click").then(
+                lit((255, 140, 0), dtype=COLOR_DTYPE)
+            ).otherwise(
+                lit((255, 255, 0), dtype=COLOR_DTYPE)
+            ),
         )
         .drop("x", "y")
         .collect()
     )
     send_columns(
-        "screen/mouse",
+        "mouse",
         indexes=rerun_dataframe_indexes(df),
         columns=Points2D.columns(
-            positions=df["mouse"].to_numpy(),  # colors=df["color"].to_numpy()
+            positions=df["mouse"].to_numpy(),
+            colors=[Color(arr) for arr in df["color"].to_list()],
         ),
     )
 
@@ -135,17 +142,19 @@ def log_tobii(lf: LazyFrame, /, form: "FormEntry"):
                 .drop("gazepoint_validity")
                 .with_columns(
                     gazepoint_display=(LPOG + RPOG) / 2.0,
-                    color=lit((0, 255, 255, 0), dtype=COLOR_DTYPE),
+                    color=lit((0, 255, 255), dtype=COLOR_DTYPE),
                 ),
                 lf.filter(LV & RV.not_())
                 .drop("gazepoint_validity")
                 .with_columns(
-                    gazepoint_display=LPOG, color=lit((0, 0, 255, 0), dtype=COLOR_DTYPE)
+                    gazepoint_display=LPOG,
+                    color=lit((0, 0, 255), dtype=COLOR_DTYPE),
                 ),
                 lf.filter(LV.not_() & RV)
                 .drop("gazepoint_validity")
                 .with_columns(
-                    gazepoint_display=RPOG, color=lit(( 0, 255, 0, 0), dtype=COLOR_DTYPE)
+                    gazepoint_display=RPOG,
+                    color=lit((0, 255, 0), dtype=COLOR_DTYPE),
                 ),
             ]
         )
@@ -159,13 +168,12 @@ def log_tobii(lf: LazyFrame, /, form: "FormEntry"):
         .drop("x", "y")
     ).collect()
 
-    print(df["gazepoint_display"].to_numpy().shape, df["color"].to_list()[:10])
-
     send_columns(
-        "screen/tobii",
+        "screen",
         indexes=rerun_dataframe_indexes(df),
         columns=Points2D.columns(
-            positions=df["gazepoint_display"].to_numpy(), colors=df["color"].to_list()
+            positions=df["gazepoint_display"].to_numpy(),
+            colors=[Color(arr) for arr in df["color"].to_list()],
         ),
     )
 
