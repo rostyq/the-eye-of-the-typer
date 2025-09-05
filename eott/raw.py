@@ -143,7 +143,7 @@ def extract_transform_load(
     calib: bool = False,
     screen: bool = False,
     webcam: bool = False,
-    concat: bool = False,
+    concat_webcam: bool = False,
     sync: bool = True,
     dry_run: bool = False,
     overwrite: bool = False,
@@ -420,7 +420,7 @@ def extract_transform_load(
         del paths, pid, record, path, first_path
     del need_concat
 
-    if webcam and concat:
+    if webcam and concat_webcam:
         interrupted = False
         pid: int
         webcam_first_start: datetime

@@ -82,7 +82,7 @@ def _(
             screen=DataType.SCREEN in process,
             webcam=DataType.WEBCAM in process,
             dry_run=dry_run,
-            concat=concat,
+            concat_webcam=concat,
             sync=sync,
             overwrite=overwrite,
         )
