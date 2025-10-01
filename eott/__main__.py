@@ -31,6 +31,12 @@ def _(
             help="Output directory for transformed files", callback=validate_output_path
         ),
     ] = None,
+    alignment_path: Annotated[
+        Optional[Path],
+        Option(
+            help="Path to the alignment CSV file to fix webcam recording start timestamps",
+        ),
+    ] = None,
     process: Annotated[
         list[DataType],
         Option(
@@ -74,6 +80,7 @@ def _(
             zip,
             output_path,
             Path(tmpdir),
+            aligns_path=alignment_path,
             form=DataType.FORM in process,
             log=DataType.LOG in process,
             tobii=DataType.TOBII in process,

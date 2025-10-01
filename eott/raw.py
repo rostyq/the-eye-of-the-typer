@@ -43,6 +43,7 @@ from polars import (
     Enum,
     Datetime,
     Duration,
+    duration,
     from_epoch,
     read_csv,
     scan_csv,
@@ -64,6 +65,7 @@ import ffmpeg as ff
 
 __all__ = [
     "ZipDataset",
+    "Alignment",
     "Characteristic",
     "Webcam",
     "Log",
@@ -136,6 +138,7 @@ def extract_transform_load(
     dstdir: Path,
     tmpdir: Path,
     *,
+    aligns_path: Path | None = None,
     form: bool = True,
     log: bool = False,
     tobii: bool = False,
@@ -157,7 +160,9 @@ def extract_transform_load(
     ds = ZipDataset(zip)
 
     print("Scanning participants and log files...", end=" ", flush=True)
-    plf, llf = ds.scan_participants(sync)
+    plf, llf = ds.scan_participants(
+        sync, alf=Alignment.scan(aligns_path) if aligns_path else None
+    )
     print("Done.", flush=True)
 
     if form:
@@ -430,17 +435,22 @@ def extract_transform_load(
             if interrupted:
                 break
 
-            previous_end = timedelta()
-            record: int
-            webcam_part_start: datetime
-            # print(pid, webcam_first_start)
-            for record, webcam_part_start, study in (
+            # if pid != 7:
+            #     continue
+
+            df = (
                 llf.filter(pid=pid, event="start")
                 .select("record", "timestamp", "study")
                 .sort("record")
                 .collect()
-                .iter_rows()
-            ):
+            )
+
+            previous_end = timedelta()
+            record: int
+            webcam_part_start: datetime
+            previous_path: Path | None = None
+            # print(pid, webcam_first_start)
+            for record, webcam_part_start, study in df.iter_rows():
                 study = Study(study)
                 path = (
                     dstdir / "webcam" / f"P_{pid:02}" / f"{record:02}-{study.value}"
@@ -457,28 +467,29 @@ def extract_transform_load(
                 vr = VideoReader(str(path))
                 dur = timedelta(seconds=float(vr.get_frame_timestamp(-1)[1]))
                 gap = start_offset - previous_end
-                # print(previous_end, "|", start_offset, "|", dur, "|", gap, flush=True)
+                # print(record, study, previous_end, "|", start_offset, "|", dur, "|", gap, flush=True)
                 previous_end = start_offset + dur
 
                 if not gap:
+                    previous_path = path
                     continue
 
-                if not dry_run:
-                    path = path.with_stem(path.stem + "-gap")
+                if not dry_run and previous_path is not None:
+                    blank_path = path.with_stem(previous_path.stem + "-gap")
                     print(
-                        f"Creating blank video for {path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds...",
+                        f"Creating blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds...",
                         end=" ",
                         flush=True,
                     )
 
-                    if path.exists() and not overwrite:
+                    if blank_path.exists() and not overwrite:
                         print(f"Skipped. (already exists)", flush=True)
                         continue
 
                     try:
                         _ = ff.run(
                             ffmpeg_blank(
-                                str(path),
+                                str(blank_path),
                                 gap,
                             ),
                             capture_stdout=True,
@@ -493,9 +504,11 @@ def extract_transform_load(
                         break
                 else:
                     print(
-                        f"Would create blank video for {path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds",
+                        f"Would create blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds",
                         flush=True,
                     )
+                previous_path = path
+
                 del vr, dur, gap
             del previous_end, record, webcam_first_start, study, start_offset, path
 
@@ -788,7 +801,7 @@ class ZipDataset:
             )
         ]
 
-    def scan_participants(self, sync: bool = True):
+    def scan_participants(self, sync: bool = True, alf: LazyFrame | None = None):
         """
         Scan participant file and add additional information parsed from the log and spec files.
         Returns a lazy frame for participant data and log source lazy frame.
@@ -799,6 +812,63 @@ class ZipDataset:
         pdf = Characteristic.read_zip(self.ref)
         llf = Log.scan_zip(self.ref)
         slf = Spec.scan_zip(self.ref)
+
+        if alf is not None:
+            llf = llf.join(alf.drop("log"), ["pid", "record", "study"], "left")
+            llf = llf.with_columns(
+                timestamp=col("timestamp")
+                - col("frameshift").fill_null(duration(milliseconds=0, time_unit="ms")),
+                # aligned=pl.col("frameshift").is_not_null(),
+            ).drop("frameshift")
+
+        # first task frame in screen recording and timestamp
+        # when screen clock change minute
+        adjustments_table = {
+            "P_01": ("11s 733ms", 407),
+            "P_02": ("3s 350ms", 403),
+            "P_06": ("36s 828ms", -378),
+            "P_07": ("5s 160ms", 436),
+            "P_08": ("32s 32ms", -68),
+            "P_10": ("2m 34s 29ms", -647),
+            "P_12": ("34s 451ms", -159),
+            "P_13": ("1m 3s 689ms", -209),
+            "P_16": ("29s 863ms", -332),
+            "P_17": ("21s 939ms", -549),
+            "P_18": ("24s 441ms", -815),
+            "P_19": ("25s 275ms", -765),
+            "P_20": ("27s 27ms", -158),
+            "P_23": ("24s 733ms", -82),
+            "P_25": ("29s 655ms", -497),
+            "P_27": ("25s 651ms", -819),
+            "P_31": ("3m 51s 273ms", 6),
+            "P_35": ("28s 362ms", -42),
+            "P_40": ("21s 230ms", -743),
+            "P_41": ("20s 395ms", -169),
+            "P_42": ("18s 852ms", -376),
+            "P_44": ("23s 398ms", -173),
+            "P_45": ("30s 697ms", -501),
+            "P_46": ("1m 1s 645ms", 6),
+            "P_55": ("13s 805ms", -840),
+            "P_56": ("22s 856ms", -122),
+            "P_59": ("21s 813ms", -214),
+        }
+
+        if sync:
+            adjustments_rows = [
+                (
+                    int(k.removeprefix("P_")),
+                    parse_timedelta(ftf) - timedelta(milliseconds=scs),
+                )
+                for k, (ftf, scs) in adjustments_table.items()
+            ]
+        else:
+            adjustments_rows = []
+
+        adf = LazyFrame(
+            adjustments_rows,
+            schema={"pid": UInt8, "start_time": Duration("us")},
+            orient="row",
+        )
 
         plf = (
             pdf.lazy()
@@ -811,48 +881,7 @@ class ZipDataset:
                 on="pid",
             )
             .join(
-                LazyFrame(
-                    list(
-                        {
-                            int(k.removeprefix("P_")): (
-                                parse_timedelta(ftf) - timedelta(milliseconds=scs) if sync else timedelta(0)
-                            )
-                            # first task frame in screen recording
-                            # and timestamp when screen clock change minute
-                            for k, (ftf, scs) in {
-                                "P_01": ("11s 733ms", 407),
-                                "P_02": ("3s 350ms", 403),
-                                "P_06": ("36s 828ms", -378),
-                                "P_07": ("5s 160ms", 436),
-                                "P_08": ("32s 32ms", -68),
-                                "P_10": ("2m 34s 29ms", -647),
-                                "P_12": ("34s 451ms", -159),
-                                "P_13": ("1m 3s 689ms", -209),
-                                "P_16": ("29s 863ms", -332),
-                                "P_17": ("21s 939ms", -549),
-                                "P_18": ("24s 441ms", -815),
-                                "P_19": ("25s 275ms", -765),
-                                "P_20": ("27s 27ms", -158),
-                                "P_23": ("24s 733ms", -82),
-                                "P_25": ("29s 655ms", -497),
-                                "P_27": ("25s 651ms", -819),
-                                "P_31": ("3m 51s 273ms", 6),
-                                "P_35": ("28s 362ms", -42),
-                                "P_40": ("21s 230ms", -743),
-                                "P_41": ("20s 395ms", -169),
-                                "P_42": ("18s 852ms", -376),
-                                "P_44": ("23s 398ms", -173),
-                                "P_45": ("30s 697ms", -501),
-                                "P_46": ("1m 1s 645ms", 6),
-                                "P_55": ("13s 805ms", -840),
-                                "P_56": ("22s 856ms", -122),
-                                "P_59": ("21s 813ms", -214),
-                            }.items()
-                        }.items()
-                    ),
-                    schema={"pid": UInt8, "start_time": Duration("us")},
-                    orient="row",
-                ),
+                adf,
                 on="pid",
                 how="left",
             )
@@ -1092,6 +1121,84 @@ class Event(StrEnum):
             cls.TEXT_INPUT: "input",
             cls.TEXT_SUBMIT: "text",
         }
+
+
+class Alignment(StrEnum):
+    VIDEO = "video"
+    FRAMESHIFT = "frameshift"
+    CORR_OPTIMAL = "corrOptimal"
+    CORR_ORIG = "corrOrig"
+
+    @classmethod
+    def schema(cls):
+        return {
+            cls.VIDEO: String,
+            cls.FRAMESHIFT: Float64,
+            cls.CORR_OPTIMAL: Float64,
+            cls.CORR_ORIG: Float64,
+        }
+
+    @classmethod
+    def scan_raw(cls, source: Path | bytes | IO[bytes]):
+        return scan_csv(
+            source,
+            has_header=True,
+            separator=",",
+            quote_char='"',
+            null_values=["-", ""],
+            schema={k.value: v for k, v in cls.schema().items()},
+        )
+
+    @classmethod
+    def scan(cls, source: Path | bytes | IO[bytes]):
+        from dataclasses import asdict
+
+        def parse_filename_col(v: str):
+            w = Webcam.parse_raw(v)
+            assert w is not None
+            return asdict(w)
+
+        lf = cls.scan_raw(source)
+        lf = (
+            lf.select(
+                col(cls.VIDEO)
+                .str.split_exact("/", 1)
+                .struct.rename_fields(["parent", "filename"])
+                .struct.unnest(),
+                (col(cls.FRAMESHIFT) * 1e3).cast(Duration("ms")),
+            )
+            .select(
+                col("parent")
+                .str.split_exact("_", 1)
+                .struct.rename_fields(["_", "pid"])
+                .struct.field("pid")
+                .cast(UInt8),
+                col("filename")
+                .map_elements(
+                    parse_filename_col,
+                    return_dtype=Struct(
+                        {
+                            "log": Int64,
+                            "record": Int64,
+                            "study": String,
+                            "aux": Int64,
+                        }
+                    ),
+                )
+                .struct.unnest(),
+                cls.FRAMESHIFT,
+            )
+            .drop("aux")
+            .with_columns(
+                col("pid").cast(UInt8),
+                col("log").cast(UInt64),
+                col("record").cast(UInt8),
+                col("study").cast(Enum(Study.values())),
+            )
+            .sort("pid", "record")
+        )
+
+        return lf
 
 
 class Characteristic(StrEnum):
@@ -1766,10 +1873,10 @@ class Dot(SourceEnumClass, StrEnum):
         return value.endswith("final_dot_test_locations.tsv")
 
 
-def ffmpeg_blank(output: str, duration: timedelta, *, width=640, height=480):
+def ffmpeg_blank(output: str, duration: timedelta, *, width=640, height=480, fps: int = 30):
     dur = round(duration.total_seconds(), 3)
     video = ff.input(
-        f"color=black:size={width}x{height}:duration={dur:.3f}",
+        f"color=white:size={width}x{height}:rate={fps}:duration={dur:.3f}",
         f="lavfi",
     )
     audio = ff.input(
