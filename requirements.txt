@@ -1,7 +1,0 @@
-polars>=1.32
-ffmpeg-python>=0.2.0
-rerun-sdk>=0.24
-opencv-python>=4.9
-decord>=0.6
-typer>=0.16.0
-tzdata>=2022
