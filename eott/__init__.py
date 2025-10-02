@@ -1,6 +1,6 @@
 from typing import TypeAlias, Literal, cast, Any
 from abc import ABC, abstractmethod
-from enum import StrEnum, auto
+from enum import StrEnum
 from os import environ, PathLike
 from pathlib import Path
 from polars import read_parquet, scan_parquet
@@ -21,9 +21,11 @@ from .raw import (
     Weather,
     PointingDevice,
     Study,
+    DataType,
     StudyName,
-    print_schema,
 )
+from .util import print_schema
+
 
 __all__ = [
     "Setting",
@@ -57,16 +59,6 @@ DATA_SUFFIX = ".parquet"
 DataName: TypeAlias = Literal[
     "form", "screen", "webcam", "log", "tobii", "dot", "calib"
 ]
-
-
-class DataType(StrEnum):
-    FORM = auto()
-    SCREEN = auto()
-    WEBCAM = auto()
-    LOG = auto()
-    TOBII = auto()
-    DOT = auto()
-    CALIB = auto()
 
 
 class IlluminatingMode(StrEnum):

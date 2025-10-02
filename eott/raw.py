@@ -1,30 +1,23 @@
 from typing import (
     Self,
     IO,
-    Mapping,
     overload,
     Literal,
     Callable,
     cast,
     Iterable,
-    Mapping,
-    DefaultDict,
     TypeAlias,
 )
 from pathlib import Path
-from datetime import datetime
 from abc import abstractmethod, ABCMeta
-from os import PathLike, SEEK_END, SEEK_SET, remove as remove_file
-from io import TextIOBase
-from contextlib import suppress
+from os import SEEK_END, SEEK_SET
 from functools import cached_property, cache
 from enum import auto, StrEnum, EnumMeta
-from re import compile, match, search, findall
+from re import compile, match, search
 from dataclasses import dataclass
 from zipfile import ZipFile, ZipInfo
 from datetime import timedelta
-from collections import defaultdict
-from shutil import move as move_file
+from functools import partial, cached_property
 
 from polars import (
     String,
@@ -58,13 +51,13 @@ from polars import (
     LazyFrame,
 )
 from polars._typing import PolarsDataType
-from decord import VideoReader
 
-import ffmpeg as ff
+from .util import parse_timedelta, NameEnum
 
 
 __all__ = [
     "ZipDataset",
+    "DataType",
     "Alignment",
     "Characteristic",
     "Webcam",
@@ -87,27 +80,18 @@ __all__ = [
     "Study",
     "StudyName",
     "Source",
-    "print_schema",
-    "play_with_mpv",
-    "ffmpeg_args",
     "pid_from_name",
-    "parse_timedelta",
-    "extract_transform_load",
 ]
 
 
-class NameEnum(StrEnum):
-    @classmethod
-    def from_id(cls, i: int):
-        return cls.__members__[cls._member_names_[i]]
-
-    @classmethod
-    def values(cls):
-        return [item.value for item in cls.__members__.values()]
-
-    @cached_property
-    def id(self):
-        return self.__class__._member_names_.index(self.name)
+class DataType(StrEnum):
+    FORM = auto()
+    SCREEN = auto()
+    WEBCAM = auto()
+    LOG = auto()
+    TOBII = auto()
+    DOT = auto()
+    CALIB = auto()
 
 
 class Study(NameEnum):
@@ -131,427 +115,6 @@ class Study(NameEnum):
     DOT_TEST_FINAL_INSTRUCTIONS = auto()
     DOT_TEST_FINAL = auto()
     THANK_YOU = auto()
-
-
-def extract_transform_load(
-    zip: ZipFile,
-    dstdir: Path,
-    tmpdir: Path,
-    *,
-    aligns_path: Path | None = None,
-    form: bool = True,
-    log: bool = False,
-    tobii: bool = False,
-    dot: bool = False,
-    calib: bool = False,
-    screen: bool = False,
-    webcam: bool = False,
-    concat_webcam: bool = False,
-    sync: bool = True,
-    dry_run: bool = False,
-    overwrite: bool = False,
-):
-    _prefix = (
-        Path(zip.filename).stem
-        if zip.filename
-        else zip.filelist[0].filename.split("/")[0]
-    )
-    dstdir.mkdir(parents=True, exist_ok=True)
-    ds = ZipDataset(zip)
-
-    print("Scanning participants and log files...", end=" ", flush=True)
-    plf, llf = ds.scan_participants(
-        sync, alf=Alignment.scan(aligns_path) if aligns_path else None
-    )
-    print("Done.", flush=True)
-
-    if form:
-        if not dry_run:
-            print(
-                "Saving participants and log files to parquet...", end=" ", flush=True
-            )
-            if not (dst := dstdir / "form.parquet").exists() or overwrite:
-                plf.sink_parquet(dst, compression="uncompressed")
-                print("Done.", flush=True)
-            else:
-                print("Skipped. (already exists)", flush=True)
-            del dst
-        else:
-            print("Skipped. (dry run)", flush=True)
-
-    if log:
-        print("Saving log file to parquet...", end=" ", flush=True)
-        if not dry_run:
-            if not (dst := dstdir / "log.parquet").exists() or overwrite:
-                llf.sink_parquet(dst, compression="uncompressed")
-                print("Done.", flush=True)
-            else:
-                print("Skipped. (already exists)", flush=True)
-            del dst
-        else:
-            print("Skipped. (dry run)", flush=True)
-
-    if tobii:
-        print("Processing Tobii data...", end=" ", flush=True)
-        if not dry_run:
-            if not (dst := dstdir / "tobii.parquet").exists() or overwrite:
-                Tobii.scan_zip(zip).sink_parquet(dst, compression="lz4")
-                print("Done.", flush=True)
-            else:
-                print("Skipped. (already exists)", flush=True)
-            del dst
-        else:
-            print("Skipped. (dry run)", flush=True)
-
-    if dot:
-        print("Processing Dot data...", end=" ", flush=True)
-        if not dry_run:
-            if not (dst := dstdir / "dot.parquet").exists() or overwrite:
-                Dot.scan_zip(zip).sink_parquet(dst, compression="uncompressed")
-                print("Done.", flush=True)
-            else:
-                print("Skipped. (already exists)", flush=True)
-            del dst
-        else:
-            print("Skipped. (dry run)", flush=True)
-
-    if calib:
-        if not dry_run:
-            print("Processing calibration data...", end=" ", flush=True)
-            if not (dst := dstdir / "calib.parquet").exists() or overwrite:
-                Calib.scan_zip(zip).sink_parquet(dst, compression="uncompressed")
-                print("Done.", flush=True)
-            else:
-                print("Skipped. (already exists)", flush=True)
-            del dst
-        else:
-            print("Skipped. (dry run)", flush=True)
-
-    (dstdir / "screen").mkdir(exist_ok=True)
-    for file in ds.screen_files() if screen else []:
-        dst = dstdir / "screen" / f"P_{pid_from_name(file.filename, error=True):02}.mp4"
-        print(
-            f"Extracting screen video from {file.filename.removeprefix(_prefix)} into {dst.relative_to(dstdir)}...",
-            end=" " if not dry_run else "\n",
-            flush=True,
-        )
-
-        input_path = None
-        if dst.exists() and not overwrite:
-            print("Skipped. (already exists)", flush=True)
-            continue
-
-        dst = str(dst)
-
-        match file.filename.split(".")[-1].strip().lower():
-            case "flv":
-                f = ff.input("pipe:", f=file.filename.split(".")[-1])
-                f = ff.output(
-                    f.audio,
-                    ff.filter(f.video, "scale", "iw/2", "ih/2"),
-                    dst,
-                    format="mp4",
-                    fps_mode="passthrough",
-                )
-
-            case "mov":
-                input_path = tmpdir / file.filename.split("/")[-1]
-
-                if not dry_run:
-                    with zip.open(file) as zf, open(input_path, "wb") as f:
-                        f.write(zf.read())
-
-                f = ff.input(input_path)
-                f = ff.output(
-                    f.audio,
-                    ff.filter(ff.filter(f.video, "fps", 25), "scale", "iw/2", "ih/2"),
-                    dst,
-                    format="mp4",
-                )
-
-        if dry_run:
-            print(
-                f"{file.filename.removeprefix(_prefix)} -> {' '.join(ff.get_args(f))}"
-            )
-            continue
-
-        try:
-            _ = ff.run(
-                f,
-                input=None if input_path else zip.read(file),
-                capture_stdout=True,
-                capture_stderr=True,
-                overwrite_output=True,
-            )
-            print("Done.", flush=True)
-            del f
-
-        except ff.Error as e:
-            with suppress(OSError):
-                remove_file(dst)
-
-            raise RuntimeError(e.stderr.decode()) from e
-
-        except KeyboardInterrupt:
-            with suppress(OSError):
-                remove_file(dst)
-                break
-
-        finally:
-            if input_path and not dry_run:
-                with suppress(OSError):
-                    remove_file(input_path)
-        del file, dst, input_path
-
-    need_concat: DefaultDict[tuple[int, int], list[Path]] = defaultdict(list)
-    (dstdir / "webcam").mkdir(exist_ok=True)
-    for file in ds.webcam_files() if webcam else []:
-        w = cast(Webcam, Webcam.parse_raw(file.filename))
-        pid = pid_from_name(file.filename, error=True)
-
-        dst = (
-            dstdir / "webcam" / f"P_{pid:02}" / f"{w.record:02}-{w.study.value}"
-        ).with_suffix(".mp4")
-
-        if w.aux is not None:
-            if dst.exists():
-                print("Skipped. (already exists)", flush=True)
-                continue
-            dst = dst.with_stem(f"{dst.stem}-{w.aux}")
-            need_concat[(pid, w.record)].append(dst)
-
-        print(
-            f"Extracting webcam video from {file.filename.removeprefix(_prefix)} into {dst.relative_to(dstdir)} ...",
-            end=" ",
-            flush=True,
-        )
-
-        if dst.exists() and not overwrite:
-            print("Skipped. (already exists)", flush=True)
-            continue
-
-        dst.parent.mkdir(exist_ok=True)
-        dst = str(dst)
-
-        f = ff.input("pipe:", f="webm")
-        # v = ff.filter(f.video, "fps", 30)
-        # f = ff.output(v, f.audio, dst, format="mp4", reset_timestamps="1")
-        f = ff.output(f, dst, format="mp4", fps_mode="passthrough")
-
-        if dry_run:
-            print(" ".join(ff.get_args(f)))
-            continue
-
-        try:
-            _ = ff.run(
-                f,
-                input=zip.read(file),
-                capture_stdout=True,
-                capture_stderr=True,
-                overwrite_output=overwrite,
-            )
-            print("Done.", flush=True)
-            del f
-
-        except ff.Error as e:
-            with suppress(OSError):
-                remove_file(dst)
-            raise RuntimeError(e.stderr.decode()) from e
-
-        except KeyboardInterrupt:
-            with suppress(OSError):
-                remove_file(dst)
-            break
-        del file, w, pid, dst
-
-    for (pid, record), paths in need_concat.items():
-        # sort by aux number
-        paths.sort(key=lambda p: int(p.stem[-1]))
-        # get path for file with no aux number
-        path = (path := paths[0]).with_stem(path.stem.removesuffix("-1"))
-        first_path = path.with_stem(path.stem + "-0")
-
-        if not dry_run:
-            # path will be concatenated video
-            move_file(str(path), str(first_path))
-        else:
-            print(
-                f"Would move {path.relative_to(dstdir)} to {first_path.relative_to(dstdir)} for concatenation"
-            )
-
-        paths.insert(0, first_path)
-        f = ff.concat(*[ff.input(str(p)) for p in paths])
-        f = ff.output(f, str(path))
-
-        print(
-            "Concatenating aux webcam videos for participant",
-            pid,
-            "record",
-            record,
-            "...",
-            end=" ",
-            flush=True,
-        )
-        if not dry_run:
-            try:
-                _ = ff.run(
-                    f,
-                    capture_stdout=True,
-                    capture_stderr=True,
-                    overwrite_output=overwrite,
-                )
-                print("Done.", flush=True)
-
-                for p in map(str, paths):
-                    with suppress(OSError):
-                        remove_file(p)
-
-                del f, p
-
-            except ff.Error as e:
-                with suppress(OSError):
-                    remove_file(str(path))
-                    move_file(str(first_path), str(path))
-                raise RuntimeError(e.stderr.decode()) from e
-
-            except KeyboardInterrupt:
-                with suppress(OSError):
-                    remove_file(str(path))
-                    move_file(str(first_path), str(path))
-                break
-        else:
-            print(" ".join(ff.get_args(f)), flush=True)
-
-        del paths, pid, record, path, first_path
-    del need_concat
-
-    if webcam and concat_webcam:
-        interrupted = False
-        pid: int
-        webcam_first_start: datetime
-        for pid, webcam_first_start in (
-            plf.select("pid", "webcam_start").collect().iter_rows()
-        ):
-            if interrupted:
-                break
-
-            # if pid != 7:
-            #     continue
-
-            df = (
-                llf.filter(pid=pid, event="start")
-                .select("record", "timestamp", "study")
-                .sort("record")
-                .collect()
-            )
-
-            previous_end = timedelta()
-            record: int
-            webcam_part_start: datetime
-            previous_path: Path | None = None
-            # print(pid, webcam_first_start)
-            for record, webcam_part_start, study in df.iter_rows():
-                study = Study(study)
-                path = (
-                    dstdir / "webcam" / f"P_{pid:02}" / f"{record:02}-{study.value}"
-                ).with_suffix(".mp4")
-                start_offset = webcam_part_start - webcam_first_start
-
-                if not path.exists():
-                    print(
-                        f"Webcam video for {path} does not exist, skipping...",
-                        flush=True,
-                    )
-                    continue
-
-                vr = VideoReader(str(path))
-                dur = timedelta(seconds=float(vr.get_frame_timestamp(-1)[1]))
-                gap = start_offset - previous_end
-                # print(record, study, previous_end, "|", start_offset, "|", dur, "|", gap, flush=True)
-                previous_end = start_offset + dur
-
-                if not gap:
-                    previous_path = path
-                    continue
-
-                if not dry_run and previous_path is not None:
-                    blank_path = path.with_stem(previous_path.stem + "-gap")
-                    print(
-                        f"Creating blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds...",
-                        end=" ",
-                        flush=True,
-                    )
-
-                    if blank_path.exists() and not overwrite:
-                        print(f"Skipped. (already exists)", flush=True)
-                        continue
-
-                    try:
-                        _ = ff.run(
-                            ffmpeg_blank(
-                                str(blank_path),
-                                gap,
-                            ),
-                            capture_stdout=True,
-                            capture_stderr=True,
-                            overwrite_output=overwrite,
-                        )
-                        print("Done.", flush=True)
-                    except ff.Error as e:
-                        print(f"Error running ffmpeg: {e.stderr.decode('utf-8')}")
-                    except KeyboardInterrupt:
-                        interrupted = True
-                        break
-                else:
-                    print(
-                        f"Would create blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds",
-                        flush=True,
-                    )
-                previous_path = path
-
-                del vr, dur, gap
-            del previous_end, record, webcam_first_start, study, start_offset, path
-
-            input_dir = dstdir / "webcam" / f"P_{pid:02}"
-            output_path = input_dir.with_suffix(".mp4")
-
-            # for p in sorted(input_dir.glob("*.mp4"), key=lambda p: p.stem):
-            #     print(p)
-
-            if not dry_run:
-                print(
-                    f"Concatenating webcam videos for participant {pid} ...",
-                    end=" ",
-                    flush=True,
-                )
-
-                if output_path.exists() and not overwrite:
-                    print("Skipped. (already exists)", flush=True)
-                    continue
-
-                inputs = [
-                    ff.input(str(p))
-                    for p in sorted(input_dir.glob("*.mp4"), key=lambda p: p.stem)
-                ]
-
-                try:
-                    _ = ff.run(
-                        ff.output(
-                            ff.concat(*inputs), str(output_path), fps_mode="passthrough"
-                        ),
-                        capture_stdout=True,
-                        capture_stderr=True,
-                        overwrite_output=overwrite,
-                    )
-                except ff.Error as e:
-                    print(f"Error running ffmpeg: {e.stderr.decode('utf-8')}")
-
-                del inputs
-            else:
-                print(
-                    f"Would concatenate webcam videos for participant {pid} into {output_path.relative_to(dstdir)}",
-                    flush=True,
-                )
 
 
 def webcam_durations_by_log(llf: LazyFrame) -> dict[tuple[int, int, Study], timedelta]:
@@ -587,163 +150,6 @@ def webcam_durations_by_log(llf: LazyFrame) -> dict[tuple[int, int, Study], time
         (pid, record, study): duration
         for (pid, record, study, duration) in llf.collect().iter_rows()
     }
-
-
-@overload
-def parse_timedelta(s: str) -> timedelta: ...
-@overload
-def parse_timedelta(s: str, ignore_error: Literal[False]) -> timedelta: ...
-@overload
-def parse_timedelta(s: str, ignore_error: Literal[True]) -> timedelta | None: ...
-def parse_timedelta(s: str, ignore_error: bool = False) -> timedelta | None:
-    """
-    Parse a time string into a timedelta object.
-
-    Supports all timedelta units:
-    - w: weeks
-    - d: days
-    - h: hours
-    - m: minutes
-    - s: seconds
-    - ms: milliseconds
-    - us: microseconds
-
-    Examples:
-    - "1s" -> 1 second
-    - "1m" -> 1 minute
-    - "1h" -> 1 hour
-    - "1d" -> 1 day
-    - "1w" -> 1 week
-    - "1ms" -> 1 millisecond
-    - "1us" -> 1 microsecond
-    - "1w2d3h4m5s6ms7us" -> combined time units
-    """
-    if not s.strip():
-        if ignore_error:
-            return None
-        else:
-            raise ValueError("Empty time string")
-
-    s = "".join(c for c in s if not c.isspace())
-
-    # Pattern to match number followed by unit
-    # Order matters: longer units must come before shorter ones (ms before m, us before s)
-    pattern = r"(\d+(?:\.\d+)?)(us|ms|[wdhms])"
-    matches = findall(pattern, s.lower())
-
-    if not matches:
-        if ignore_error:
-            return None
-        else:
-            raise ValueError(f"Invalid time format: {s}")
-
-    # Check if entire string was consumed
-    consumed_length = sum(len(match[0]) + len(match[1]) for match in matches)
-    if consumed_length != len(s.replace(" ", "")):
-        if ignore_error:
-            return None
-        else:
-            raise ValueError(f"Invalid time format: {s}")
-
-    weeks, days, hours, minutes, seconds, milliseconds, microseconds = (
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-    )
-
-    for digits, unit in cast(
-        list[tuple[str, Literal["us", "ms", "s", "m", "h", "d", "w"]]], matches
-    ):
-        value = float(digits)
-        match unit:
-            case "us":
-                microseconds = value
-            case "ms":
-                milliseconds = value
-            case "s":
-                seconds = value
-            case "m":
-                minutes = value
-            case "h":
-                hours = value
-            case "d":
-                days = value
-            case "w":
-                weeks = value
-
-    return timedelta(
-        days=days,
-        seconds=seconds,
-        microseconds=microseconds,
-        milliseconds=milliseconds,
-        minutes=minutes,
-        hours=hours,
-        weeks=weeks,
-    )
-
-
-def print_schema(
-    schema: Mapping[str, "PolarsDataType"],
-    name: str = "",
-    /,
-    out: TextIOBase | None = None,
-    *,
-    indent: str = "\t",
-    depth: int = 0,
-):
-    assert indent.isspace() or len(indent) == 0
-    assert depth >= 0
-
-    if depth == 0 and name:
-        print(name, end=":\n", file=out)
-    else:
-        print(end="\n", file=out)
-
-    for field, data_type in schema.items():
-        print(f"{indent * (depth + 1 if name else depth)}{field}:", end="", file=out)
-        if isinstance(data_type, Struct):
-            print_schema(
-                data_type.to_schema(), field, out=out, indent=indent, depth=depth + 1
-            )
-        else:
-            print(f" {data_type}", file=out)
-
-
-def ffmpeg_args(
-    i: str = "pipe:0",
-    o: str = "pipe:0",
-    *,
-    exe: str = "ffmpeg",
-    fmt: str | None = None,
-    cmds: Iterable[str] = [],
-    params: Mapping[str, str] = {},
-):
-    res = [exe, "-i", i]
-
-    if fmt is not None:
-        res.insert(1, f"-f")
-        res.insert(2, fmt)
-
-    for cmd in cmds:
-        res.append(f"-{cmd}")
-
-    for key, value in params.items():
-        res.append(f"-{key}")
-        res.append(value)
-
-    res.append(o)
-
-    return res
-
-
-def play_with_mpv(src: PathLike):
-    from subprocess import run
-
-    return run(["mpv", "--osd-fractions", "--osd-level=2", src], shell=True)
 
 
 @overload
@@ -784,6 +190,13 @@ class ZipDataset:
     @property
     def files(self) -> list[ZipInfo]:
         return self.ref.filelist
+
+    @cached_property
+    def _prefix(self) -> str:
+        if (ref := self.ref).filename:
+            return Path(ref.filename).stem
+        else:
+            return ref.filelist[0].filename.split("/")[0]
 
     def screen_files(self):
         return [
@@ -1872,17 +1285,3 @@ class Dot(SourceEnumClass, StrEnum):
     def source_filename(cls, value: str) -> bool:
         return value.endswith("final_dot_test_locations.tsv")
 
-
-def ffmpeg_blank(output: str, duration: timedelta, *, width=640, height=480, fps: int = 30):
-    dur = round(duration.total_seconds(), 3)
-    video = ff.input(
-        f"color=white:size={width}x{height}:rate={fps}:duration={dur:.3f}",
-        f="lavfi",
-    )
-    audio = ff.input(
-        f"anullsrc=channel_layout=stereo:sample_rate=48000:duration={dur:.3f}",
-        f="lavfi",
-    )
-    return ff.output(
-        video, audio, output, format="mp4"  # , movflags="frag_keyframe+empty_moov",
-    )

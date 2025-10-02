@@ -46,10 +46,10 @@ def _(
     dry_run: Annotated[
         bool, Option(help="Run without making changes, just show what would be done")
     ] = False,
-    concat: Annotated[
+    merge: Annotated[
         bool,
         Option(
-            help="Concatenate webcam video files into a single file for each participant",
+            help="Merge webcam video files into a single file for each participant",
         ),
     ] = False,
     overwrite: Annotated[
@@ -66,37 +66,35 @@ def _(
     ] = True,
 ):
     from tempfile import TemporaryDirectory
-    from eott.raw import extract_transform_load
+    from eott.util import println
+    from eott.etl import extract_transform_load
 
     if output_path is None:
         output_path = dataset_path.parent / "eott"
 
-    print(f"Start extracting dataset from {dataset_path} to {output_path}", flush=True)
-    with ZipFile(dataset_path, "r") as zip, TemporaryDirectory(
-        prefix="eott-", ignore_cleanup_errors=True
-    ) as tmpdir:
+    println(f"Start extracting dataset from {dataset_path} to {output_path}")
+    with (
+        ZipFile(dataset_path, "r") as zip,
+        TemporaryDirectory(prefix="eott-", ignore_cleanup_errors=True) as tmpdir,
+    ):
         start_time = time()
+
+        output_path.mkdir(parents=True, exist_ok=True)
+
         extract_transform_load(
             zip,
+            set(process),
             output_path,
             Path(tmpdir),
             aligns_path=alignment_path,
-            form=DataType.FORM in process,
-            log=DataType.LOG in process,
-            tobii=DataType.TOBII in process,
-            dot=DataType.DOT in process,
-            calib=DataType.CALIB in process,
-            screen=DataType.SCREEN in process,
-            webcam=DataType.WEBCAM in process,
             dry_run=dry_run,
-            concat_webcam=concat,
+            merge_webcam=merge,
             sync=sync,
             overwrite=overwrite,
         )
         elapsed_time = timedelta(seconds=time() - start_time)
-        print(
+        println(
             f"ETL process completed in {elapsed_time}. Files saved to {output_path}",
-            flush=True,
         )
 
 
