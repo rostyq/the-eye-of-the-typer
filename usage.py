@@ -2,10 +2,10 @@
 # ruff: noqa
 
 # %%
-%load_ext dotenv
-%load_ext autoreload
-%dotenv
-%env EOTT_DATASET_PATH
+# %load_ext dotenv
+# %load_ext autoreload
+# %dotenv
+# %env EOTT_DATASET_PATH
 #
 # %%
 from datetime import datetime, timedelta
