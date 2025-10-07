@@ -1,4 +1,4 @@
-from typing import Optional, Annotated
+from typing import Annotated
 from pathlib import Path
 from zipfile import ZipFile
 from time import time
@@ -10,8 +10,8 @@ from eott import DataType
 
 
 def validate_output_path(
-    ctx: Context, param: CallbackParam, value: Optional[Path]
-) -> Optional[Path]:
+    ctx: Context, param: CallbackParam, value: Path | None
+) -> Path | None:
     if ctx.resilient_parsing:
         return
     if value is not None and not value.is_dir():
@@ -21,18 +21,20 @@ def validate_output_path(
 
 app = Typer()
 
+PROCESSES = list(DataType)
+
 
 @app.command(name="etl")
 def _(
     dataset_path: Annotated[Path, Argument(help="Path to the dataset zip file")],
     output_path: Annotated[
-        Optional[Path],
+        Path | None,
         Option(
             help="Output directory for transformed files", callback=validate_output_path
         ),
     ] = None,
     alignment_path: Annotated[
-        Optional[Path],
+        Path | None,
         Option(
             help="Path to the alignment CSV file to fix webcam recording start timestamps",
         ),
@@ -42,7 +44,7 @@ def _(
         Option(
             help="Data types to process. Defaults to all types", case_sensitive=False
         ),
-    ] = list(DataType.__members__.values()),
+    ] = PROCESSES,
     dry_run: Annotated[
         bool, Option(help="Run without making changes, just show what would be done")
     ] = False,

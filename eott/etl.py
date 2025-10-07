@@ -1,4 +1,4 @@
-from typing import cast, DefaultDict
+from typing import cast, Any
 from pathlib import Path
 from datetime import datetime
 from os import remove as remove_file
@@ -31,7 +31,9 @@ from .util import printf, println, ffmpeg_blank
 __all__ = ["extract_transform_load"]
 
 
-def _sink_data(lf: LazyFrame, dst: Path, params, *, overwrite: bool, dry_run: bool):
+def _sink_data(
+    lf: LazyFrame, dst: Path, params: dict[str, Any], *, overwrite: bool, dry_run: bool
+):
     printf(f"Saving {dst.stem} to {dst} ... ")
     if not dry_run:
         if not dst.exists() or overwrite:
@@ -51,7 +53,7 @@ def _process_screen_videos(
     for file in ds.screen_files():
         dst = dstdir / f"P_{pid_from_name(file.filename, error=True):02}.mp4"
         printf(
-            f"Extracting screen video from {file.filename.removeprefix(ds._prefix)} into {dst.relative_to(dstdir)}..."
+            f"Extracting screen video from {file.filename.removeprefix(ds.prefix)} into {dst.relative_to(dstdir)}..."
             + (" " if not dry_run else "\n"),
         )
 
@@ -78,7 +80,7 @@ def _process_screen_videos(
 
                 if not dry_run:
                     with ds.ref.open(file) as zf, open(input_path, "wb") as f:
-                        f.write(zf.read())
+                        _ = f.write(zf.read())
 
                 f = ff.input(input_path)
                 f = ff.output(
@@ -87,10 +89,12 @@ def _process_screen_videos(
                     dst,
                     format="mp4",
                 )
+            case _:
+                raise ValueError(f"Unsupported screen video format: {file.filename}")
 
         if dry_run:
             print(
-                f"{file.filename.removeprefix(ds._prefix)} -> {' '.join(ff.get_args(f))}"
+                f"{file.filename.removeprefix(ds.prefix)} -> {' '.join(ff.get_args(f))}"
             )
             continue
 
@@ -129,29 +133,32 @@ def _process_webcam_videos(
 ):
     dstdir.mkdir(exist_ok=True)
 
-    fragmented: DefaultDict[tuple[int, int], list[Path]] = defaultdict(list)
+    fragmented = defaultdict[tuple[int, int], list[Path]](list)
     for file in ds.webcam_files():
         w = cast(Webcam, Webcam.parse_raw(file.filename))
         pid = pid_from_name(file.filename, error=True)
 
-        dst = (
-            dstdir / "webcam" / f"P_{pid:02}" / f"{w.record:02}-{w.study.value}"
-        ).with_suffix(".mp4")
+        printf(
+            f"Extracting webcam video from {file.filename.removeprefix(ds.prefix)} ",
+        )
+
+        dst = (dstdir / f"P_{pid:02}" / f"{w.record:02}-{w.study.value}").with_suffix(
+            ".mp4"
+        )
 
         if w.aux is not None:
             if dst.exists():
-                printf("Skipped. (already exists)")
+                println("Skipped. (already exists)")
                 continue
             dst = dst.with_stem(f"{dst.stem}-{w.aux}")
             fragmented[(pid, w.record)].append(dst)
 
         printf(
-            f"Extracting webcam video from {file.filename.removeprefix(ds._prefix)} into {dst.relative_to(dstdir)} ...",
-            end=" ",
+            f"into {dst.relative_to(dstdir)} ... ",
         )
 
         if dst.exists() and not overwrite:
-            printf("Skipped. (already exists)")
+            println("Skipped. (already exists)")
             continue
 
         dst.parent.mkdir(exist_ok=True)
@@ -174,7 +181,7 @@ def _process_webcam_videos(
                 capture_stderr=True,
                 overwrite_output=overwrite,
             )
-            printf("Done.")
+            println("Done.")
             del f
 
         except ff.Error as e:
@@ -208,7 +215,7 @@ def _concat_fragmented_webcam_videos(
 
     if not dry_run:
         # path will be concatenated video
-        move_file(str(path), str(first_path))
+        _ = move_file(str(path), str(first_path))
     else:
         print(
             f"Would move {path.relative_to(dstdir)} to {first_path.relative_to(dstdir)} for concatenation"
@@ -241,19 +248,20 @@ def _concat_fragmented_webcam_videos(
         for p in map(str, paths):
             with suppress(OSError):
                 remove_file(p)
+            del p
 
-        del f, p
+        del f
 
     except ff.Error as e:
         with suppress(OSError):
             remove_file(str(path))
-            move_file(str(first_path), str(path))
+            _ = move_file(str(first_path), str(path))
         raise RuntimeError(e.stderr.decode()) from e
 
     except KeyboardInterrupt as e:
         with suppress(OSError):
             remove_file(str(path))
-            move_file(str(first_path), str(path))
+            _ = move_file(str(first_path), str(path))
         raise e
 
 
@@ -275,7 +283,7 @@ def _merge_webcam_videos(
         df = (
             llf.filter(pid=pid, event="start")
             .select("record", "timestamp", "study")
-            .sort("record")
+            .sort("timestamp")
             .collect()
         )
 
@@ -292,7 +300,7 @@ def _merge_webcam_videos(
             start_offset = webcam_part_start - webcam_first_start
 
             if not path.exists():
-                printf(
+                println(
                     f"Webcam video for {path} does not exist, skipping...",
                 )
                 continue
@@ -300,63 +308,68 @@ def _merge_webcam_videos(
             vr = VideoReader(str(path))
             dur = timedelta(seconds=float(vr.get_frame_timestamp(-1)[1]))
             gap = start_offset - previous_end
-            # print_flush(record, study, previous_end, "|", start_offset, "|", dur, "|", gap)
+            # println(record, study, previous_end, "|", start_offset, "|", dur, "|", gap)
+            assert gap >= timedelta(), (
+                "Negative gap detected between webcam recordings!"
+            )
+
             previous_end = start_offset + dur
 
-            if not gap:
+            if previous_path is None or gap < timedelta(milliseconds=30):
                 previous_path = path
                 continue
 
-            if not dry_run and previous_path is not None:
-                blank_path = path.with_stem(previous_path.stem + "-gap")
-                printf(
-                    f"Creating blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds...",
-                    end=" ",
-                )
+            blank_path = path.with_stem(previous_path.stem + "-gap")
 
-                if blank_path.exists() and not overwrite:
-                    printf(f"Skipped. (already exists)")
-                    continue
-
-                try:
-                    _ = ff.run(
-                        ffmpeg_blank(
-                            str(blank_path),
-                            gap,
-                        ),
-                        capture_stdout=True,
-                        capture_stderr=True,
-                        overwrite_output=overwrite,
-                    )
-                    printf("Done.")
-                except ff.Error as e:
-                    print(f"Error running ffmpeg: {e.stderr.decode('utf-8')}")
-                except KeyboardInterrupt:
-                    interrupted = True
-                    break
-            else:
-                printf(
+            if dry_run:
+                println(
                     f"Would create blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds",
                 )
-            previous_path = path
+                previous_path = path
+                continue
 
-            del vr, dur, gap
-        del previous_end, record, webcam_first_start, study, start_offset, path
+            printf(
+                f"Creating blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds... ",
+            )
 
-        input_dir = dstdir / "webcam" / f"P_{pid:02}"
+            if blank_path.exists() and not overwrite:
+                println("Skipped. (already exists)")
+                previous_path = path
+                continue
+
+            try:
+                _ = ff.run(
+                    ffmpeg_blank(
+                        str(blank_path),
+                        gap,
+                    ),
+                    capture_stdout=True,
+                    capture_stderr=True,
+                    overwrite_output=overwrite,
+                )
+                println("Done.")
+            except ff.Error as e:
+                println(f"Error running ffmpeg: {e.stderr.decode('utf-8')}")
+            except KeyboardInterrupt:
+                interrupted = True
+                break
+            finally:
+                previous_path = path
+
+            del vr, dur, gap, record, study, start_offset, path
+        del previous_end, webcam_first_start
+
+        input_dir = dstdir / f"P_{pid:02}"
         output_path = input_dir.with_suffix(".mp4")
 
         # for p in sorted(input_dir.glob("*.mp4"), key=lambda p: p.stem):
         #     print(p)
 
         if not dry_run:
-            printf(
-                f"Concatenating webcam videos for participant {pid} ...",
-                end=" ",
-            )
+            printf(f"Concatenating webcam videos for participant {pid} ... ")
 
             if output_path.exists() and not overwrite:
-                printf("Skipped. (already exists)")
+                println("Skipped. (already exists)")
                 continue
 
             inputs = [
@@ -374,11 +387,11 @@ def _merge_webcam_videos(
                     overwrite_output=overwrite,
                 )
             except ff.Error as e:
-                print(f"Error running ffmpeg: {e.stderr.decode('utf-8')}")
+                println(f"Error running ffmpeg: {e.stderr.decode('utf-8')}")
 
             del inputs
         else:
-            printf(
+            println(
                 f"Would concatenate webcam videos for participant {pid} into {output_path.relative_to(dstdir)}",
             )
 
@@ -435,8 +448,8 @@ def extract_transform_load(
             _concat_fragmented_webcam_videos(
                 pid, record, paths, webcam_dstdir, dry_run=dry_run, overwrite=overwrite
             )
-
-        del fragmented, pid, record, paths
+            del pid, record, paths
+        del fragmented
 
         if merge_webcam:
             _merge_webcam_videos(

@@ -1,13 +1,16 @@
+import operator
 from typing import (
+    Any,
     Self,
     IO,
     overload,
     Literal,
     Callable,
     cast,
-    Iterable,
+    override,
     TypeAlias,
 )
+from collections.abc import Iterable
 from pathlib import Path
 from abc import abstractmethod, ABCMeta
 from os import SEEK_END, SEEK_SET
@@ -17,7 +20,6 @@ from re import compile, match, search
 from dataclasses import dataclass
 from zipfile import ZipFile, ZipInfo
 from datetime import timedelta
-from functools import partial, cached_property
 
 from polars import (
     String,
@@ -83,6 +85,8 @@ __all__ = [
     "pid_from_name",
 ]
 
+InputType = Path | bytes | IO[bytes]
+
 
 class DataType(StrEnum):
     FORM = auto()
@@ -115,6 +119,25 @@ class Study(NameEnum):
     DOT_TEST_FINAL_INSTRUCTIONS = auto()
     DOT_TEST_FINAL = auto()
     THANK_YOU = auto()
+
+    def _cmp(self, other: Self | str, /, op: Callable[[int, int], bool]):
+        return op(self.id, (other if isinstance(other, Study) else Study(other)).id)
+
+    @override
+    def __ge__(self, other: str) -> bool:
+        return self._cmp(other, operator.ge)
+
+    @override
+    def __gt__(self, other: str) -> bool:
+        return self._cmp(other, operator.gt)
+
+    @override
+    def __le__(self, other: str) -> bool:
+        return self._cmp(other, operator.le)
+
+    @override
+    def __lt__(self, other: str) -> bool:
+        return self._cmp(other, operator.lt)
 
 
 def webcam_durations_by_log(llf: LazyFrame) -> dict[tuple[int, int, Study], timedelta]:
@@ -153,9 +176,9 @@ def webcam_durations_by_log(llf: LazyFrame) -> dict[tuple[int, int, Study], time
 
 
 @overload
-def pid_from_name(s: str, error: Literal[False] = False) -> int | None: ...
+def pid_from_name(s: str, error: Literal[False]) -> int | None: ...
 @overload
-def pid_from_name(s: str, error: Literal[True] = True) -> int: ...
+def pid_from_name(s: str, error: Literal[True]) -> int: ...
 def pid_from_name(s: str, error: bool = False) -> int | None:
     m = search(r"P_(\d{2})", s.strip())
     if m is not None:
@@ -166,7 +189,7 @@ def pid_from_name(s: str, error: bool = False) -> int | None:
 
 def concat_scan_zip(
     ref: ZipFile,
-    scan_fn: Callable[[Path | bytes | IO[bytes], int], LazyFrame],
+    scan_fn: Callable[[InputType, int], LazyFrame],
     filter_fn: Callable[[str], bool],
 ):
     return concat(
@@ -184,6 +207,8 @@ class ZipDataset:
     This is the raw dataset straight from the Eye of the Typer website.
     """
 
+    ref: ZipFile
+
     def __init__(self, ref: ZipFile):
         self.ref = ref
 
@@ -192,7 +217,7 @@ class ZipDataset:
         return self.ref.filelist
 
     @cached_property
-    def _prefix(self) -> str:
+    def prefix(self) -> str:
         if (ref := self.ref).filename:
             return Path(ref.filename).stem
         else:
@@ -415,12 +440,17 @@ class Webcam:
 
     @cache
     @staticmethod
+    def webcam_raw_filename_pattern():
+        return compile(r"([0-9]+)_([0-9]+)_-study-([a-z_]+)( \(([0-9]+)\))?\.webm$")
+
+    @cache
+    @staticmethod
     def webcam_filename_pattern():
         return compile(r"([0-9]+)_([0-9]+)_-study-([a-z_]+)( \(([0-9]+)\))?\.webm$")
 
     @classmethod
     def parse_raw(cls, s: str):
-        if (r := cls.webcam_filename_pattern().search(s)) is None:
+        if (r := cls.webcam_raw_filename_pattern().search(s)) is None:
             return
 
         log, record, study, _, aux = r.groups()
@@ -431,6 +461,28 @@ class Webcam:
         aux = int(aux) if aux is not None else None
 
         return cls(log=log, record=record, study=study, aux=aux)
+
+    def _index(self):
+        return (self.log, self.record, self.study.id, self.aux or 0)
+
+    def _cmp(
+        self,
+        other: Self,
+        op: Callable[[tuple[int, int, int, int], tuple[int, int, int, int]], bool],
+    ) -> bool:
+        return op(self._index(), other._index())
+
+    def __ge__(self, other: Self) -> bool:
+        return self._cmp(other, operator.ge)
+
+    def __gt__(self, other: Self) -> bool:
+        return self._cmp(other, operator.gt)
+
+    def __le__(self, other: Self) -> bool:
+        return self._cmp(other, operator.le)
+
+    def __lt__(self, other: Self) -> bool:
+        return self._cmp(other, operator.lt)
 
 
 class Source(NameEnum):
@@ -458,19 +510,19 @@ class Source(NameEnum):
 
 class SourceEnumClass(metaclass=EnumMeta):
     @classmethod
-    @abstractmethod
-    def schema(cls) -> dict[str, PolarsDataType]: ...
+    def schema(cls) -> dict[Any, PolarsDataType]:
+        raise NotImplementedError()
 
     @classmethod
-    @abstractmethod
-    def source_filename(cls, value: str) -> bool: ...
+    def source_filename(cls, value: str) -> bool:  # pyright: ignore[reportUnusedParameter]
+        raise NotImplementedError()
 
     @classmethod
-    @abstractmethod
-    def scan_raw(cls, source: Path | bytes | IO[bytes]) -> LazyFrame: ...
+    def scan_raw(cls, source: InputType) -> LazyFrame:  # pyright: ignore[reportUnusedParameter]
+        raise NotImplementedError()
 
     @classmethod
-    def scan(cls, source: Path | bytes | IO[bytes], pid: int) -> LazyFrame:
+    def scan(cls, source: InputType, pid: int) -> LazyFrame:
         return cls.scan_raw(source).with_columns(pid=lit(pid, UInt8))
 
     @classmethod
@@ -484,13 +536,15 @@ class SourceClass(metaclass=ABCMeta):
     def schema(cls) -> dict[str, PolarsDataType]: ...
 
     @classmethod
+    @abstractmethod
     def source_filename(cls, value: str) -> bool: ...
 
     @classmethod
-    def scan_raw(cls, source: Path | bytes | IO[bytes]) -> LazyFrame: ...
+    @abstractmethod
+    def scan_raw(cls, source: InputType) -> LazyFrame: ...
 
     @classmethod
-    def scan(cls, source: Path | bytes | IO[bytes], pid: int) -> LazyFrame:
+    def scan(cls, source: InputType, pid: int) -> LazyFrame:
         return cls.scan_raw(source).with_columns(pid=lit(pid, UInt8))
 
     @classmethod
@@ -703,7 +757,7 @@ class Characteristic(StrEnum):
 
     @classmethod
     def enums(cls) -> dict[Self, type[StrEnum]]:
-        return {
+        return {  # pyright: ignore[reportReturnType]
             cls.SETTING: Setting,
             cls.GENDER: Gender,
             cls.RACE: Race,
@@ -714,7 +768,7 @@ class Characteristic(StrEnum):
             cls.HANDEDNESS: Handedness,
             cls.WEATHER: Weather,
             cls.POINTING_DEVICE: PointingDevice,
-        }  # type: ignore
+        }
 
     @classmethod
     def read_raw(cls, source: Path | bytes | IO[bytes]):
@@ -817,40 +871,46 @@ class Log(SourceEnumClass, StrEnum):
     IS_TRUSTED = "isTrusted"
 
     @classmethod
+    @override
     def schema(cls):
-        return {
-            cls.IS_TRUSTED: Boolean,
-            cls.SESSION_ID: String,
-            cls.WEBPAGE: String,
-            cls.SESSION_STRING: String,
-            cls.EPOCH: UInt64,
-            cls.TIME: Float64,
-            cls.TYPE: String,
-            cls.EVENT: String,
-            cls.TEXT: String,
-            cls.POS: Struct({"top": UInt32, "left": UInt32}),
-            cls.SCREEN_X: Int32,
-            cls.SCREEN_Y: Int32,
-            cls.CLIENT_X: UInt16,
-            cls.CLIENT_Y: UInt16,
-            cls.PAGE_X: UInt32,
-            cls.PAGE_Y: UInt32,
-            cls.SCROLL_X: UInt32,
-            cls.SCROLL_Y: UInt32,
-            cls.WINDOW_X: Int32,
-            cls.WINDOW_Y: Int32,
-            cls.WINDOW_INNER_WIDTH: UInt16,
-            cls.WINDOW_INNER_HEIGHT: UInt16,
-            cls.WINDOW_OUTER_WIDTH: UInt16,
-            cls.WINDOW_OUTER_HEIGHT: UInt16,
-        }
+        return cast(
+            dict[Log, PolarsDataType],
+            {
+                cls.IS_TRUSTED: Boolean,
+                cls.SESSION_ID: String,
+                cls.WEBPAGE: String,
+                cls.SESSION_STRING: String,
+                cls.EPOCH: UInt64,
+                cls.TIME: Float64,
+                cls.TYPE: String,
+                cls.EVENT: String,
+                cls.TEXT: String,
+                cls.POS: Struct({"top": UInt32, "left": UInt32}),
+                cls.SCREEN_X: Int32,
+                cls.SCREEN_Y: Int32,
+                cls.CLIENT_X: UInt16,
+                cls.CLIENT_Y: UInt16,
+                cls.PAGE_X: UInt32,
+                cls.PAGE_Y: UInt32,
+                cls.SCROLL_X: UInt32,
+                cls.SCROLL_Y: UInt32,
+                cls.WINDOW_X: Int32,
+                cls.WINDOW_Y: Int32,
+                cls.WINDOW_INNER_WIDTH: UInt16,
+                cls.WINDOW_INNER_HEIGHT: UInt16,
+                cls.WINDOW_OUTER_WIDTH: UInt16,
+                cls.WINDOW_OUTER_HEIGHT: UInt16,
+            },
+        )
 
     @classmethod
+    @override
     def source_filename(cls, value: str) -> bool:
         return value.endswith(".json")
 
     @classmethod
-    def scan_raw(cls, source: Path | bytes):
+    @override
+    def scan_raw(cls, source: Path | bytes):  # pyright: ignore[reportIncompatibleMethodOverride]
         return read_json(
             source,
             schema={k.value: v for k, v in cls.schema().items()},
@@ -858,7 +918,8 @@ class Log(SourceEnumClass, StrEnum):
         ).lazy()
 
     @classmethod
-    def scan(cls, source: Path | bytes, pid: int):
+    @override
+    def scan(cls, source: Path | bytes, pid: int):  # pyright: ignore[reportIncompatibleMethodOverride]
         lf = cls.scan_raw(source)
         lf = lf.with_columns(
             col(cls.WEBPAGE)
@@ -948,54 +1009,60 @@ class Tobii(SourceEnumClass, StrEnum):
     DEVICE_TIME_STAMP = auto()
 
     @classmethod
+    @override
     def schema(cls):
-        return {
-            cls.DEVICE_TIME_STAMP: UInt64,
-            cls.SYSTEM_TIME_STAMP: UInt64,
-            cls.TRUE_TIME: Float64,
-            cls.LEFT_PUPIL_VALIDITY: Int32,
-            cls.RIGHT_PUPIL_VALIDITY: Int32,
-            cls.LEFT_GAZE_ORIGIN_VALIDITY: Int32,
-            cls.RIGHT_GAZE_ORIGIN_VALIDITY: Int32,
-            cls.LEFT_GAZE_POINT_VALIDITY: Int32,
-            cls.RIGHT_GAZE_POINT_VALIDITY: Int32,
-            cls.LEFT_PUPIL_DIAMETER: Float64,
-            cls.RIGHT_PUPIL_DIAMETER: Float64,
-            cls.LEFT_GAZE_ORIGIN_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
-            cls.RIGHT_GAZE_ORIGIN_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
-            cls.LEFT_GAZE_ORIGIN_IN_TRACKBOX_COORDINATE_SYSTEM: Array(Float64, 3),
-            cls.RIGHT_GAZE_ORIGIN_IN_TRACKBOX_COORDINATE_SYSTEM: Array(Float64, 3),
-            cls.LEFT_GAZE_POINT_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
-            cls.RIGHT_GAZE_POINT_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
-            cls.LEFT_GAZE_POINT_ON_DISPLAY_AREA: Array(Float64, 2),
-            cls.RIGHT_GAZE_POINT_ON_DISPLAY_AREA: Array(Float64, 2),
-        }
+        return cast(
+            dict[Self, PolarsDataType],
+            {
+                cls.DEVICE_TIME_STAMP: UInt64,
+                cls.SYSTEM_TIME_STAMP: UInt64,
+                cls.TRUE_TIME: Float64,
+                cls.LEFT_PUPIL_VALIDITY: Int32,
+                cls.RIGHT_PUPIL_VALIDITY: Int32,
+                cls.LEFT_GAZE_ORIGIN_VALIDITY: Int32,
+                cls.RIGHT_GAZE_ORIGIN_VALIDITY: Int32,
+                cls.LEFT_GAZE_POINT_VALIDITY: Int32,
+                cls.RIGHT_GAZE_POINT_VALIDITY: Int32,
+                cls.LEFT_PUPIL_DIAMETER: Float64,
+                cls.RIGHT_PUPIL_DIAMETER: Float64,
+                cls.LEFT_GAZE_ORIGIN_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
+                cls.RIGHT_GAZE_ORIGIN_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
+                cls.LEFT_GAZE_ORIGIN_IN_TRACKBOX_COORDINATE_SYSTEM: Array(Float64, 3),
+                cls.RIGHT_GAZE_ORIGIN_IN_TRACKBOX_COORDINATE_SYSTEM: Array(Float64, 3),
+                cls.LEFT_GAZE_POINT_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
+                cls.RIGHT_GAZE_POINT_IN_USER_COORDINATE_SYSTEM: Array(Float64, 3),
+                cls.LEFT_GAZE_POINT_ON_DISPLAY_AREA: Array(Float64, 2),
+                cls.RIGHT_GAZE_POINT_ON_DISPLAY_AREA: Array(Float64, 2),
+            },
+        )
 
     @classmethod
+    @override
     def source_filename(cls, value: str) -> bool:
         return search(r"P_[0-9][0-9]\.txt$", value) is not None
 
     @classmethod
-    def scan_raw(cls, source: Path | bytes | IO[bytes]):
+    @override
+    def scan_raw(cls, source):
         # handle corrupted files
         # polars cannot ignore parsing errors: https://github.com/pola-rs/polars/issues/13768
         test_end = b"}\n"
         # is_file = False
         if isinstance(source, (bytes, bytearray, memoryview)):
             if source[-3:-1] != test_end:
-                if isinstance(source, memoryview):
+                if isinstance(source, memoryview):  # pyright: ignore[reportUnnecessaryIsInstance]
                     source = source.tobytes()
                 source = b"".join(source.splitlines()[:-1])
         else:
             if isinstance(source, Path):
                 source = source.open("rb")
                 # is_file = True
-            source.seek(-2, SEEK_END)
+            _ = source.seek(-2, SEEK_END)
             if source.read(2) != test_end:
-                source.seek(0, SEEK_SET)
+                _ = source.seek(0, SEEK_SET)
                 source = b"".join(source.readlines()[:-1])
             else:
-                source.seek(0, SEEK_SET)
+                _ = source.seek(0, SEEK_SET)
 
         return scan_ndjson(
             source,
@@ -1005,7 +1072,8 @@ class Tobii(SourceEnumClass, StrEnum):
         )
 
     @classmethod
-    def scan(cls, source: Path | bytes | IO[bytes], pid: int):
+    @override
+    def scan(cls, source: InputType, pid: int):
         xyz = ("x", "y", "z")
         xy = ("x", "y")
         lf = cls.scan_raw(source)
@@ -1084,6 +1152,10 @@ Point3 = tuple[float, float, float]
 
 
 class Spec(SourceClass):
+    tracking_box: dict[Corner, Point3]
+    ilumination_mode: str | None
+    frequency: float | None
+
     def __init__(
         self,
         tracking_box: dict[Corner, Point3],
@@ -1128,24 +1200,28 @@ class Spec(SourceClass):
         )
 
     @classmethod
+    @override
     def schema(cls):
         point = Array(Float64, 3)
-        return {
-            "tracking_box": Struct(
-                {
-                    "b_lo_l": point,
-                    "b_lo_r": point,
-                    "b_up_l": point,
-                    "b_up_r": point,
-                    "f_lo_l": point,
-                    "f_lo_r": point,
-                    "f_up_l": point,
-                    "f_up_r": point,
-                }
-            ),
-            "illumination_mode": Categorical(),
-            "frequency": Float64,
-        }
+        return cast(
+            dict[str, PolarsDataType],
+            {
+                "tracking_box": Struct(
+                    {
+                        "b_lo_l": point,
+                        "b_lo_r": point,
+                        "b_up_l": point,
+                        "b_up_r": point,
+                        "f_lo_l": point,
+                        "f_lo_r": point,
+                        "f_up_l": point,
+                        "f_up_r": point,
+                    }
+                ),
+                "illumination_mode": Categorical(),
+                "frequency": Float64,
+            },
+        )
 
     def to_lf(self, pid: int | None = None) -> LazyFrame:
         lf = LazyFrame(
@@ -1166,20 +1242,22 @@ class Spec(SourceClass):
         return lf
 
     @classmethod
-    def scan_raw(cls, source: Path | bytes | IO[bytes]):
+    @override
+    def scan_raw(cls, source):
         if isinstance(source, Path):
             with source.open("rb") as src:
                 payload = src.readlines()
         elif isinstance(source, (bytes, bytearray)):
             payload = source.splitlines()
-        elif isinstance(source, memoryview):
+        elif isinstance(source, memoryview):  # pyright: ignore[reportUnnecessaryIsInstance]
             payload = source.tobytes().splitlines()
         else:
-            payload = cast(IO[bytes], source)
+            payload = cast(IO[bytes], source)  # pyright: ignore[reportUnnecessaryCast]
 
         return cls.from_lines(payload).to_lf()
 
     @classmethod
+    @override
     def source_filename(cls, value: str) -> bool:
         return value.endswith("specs.txt")
 
@@ -1195,20 +1273,25 @@ class Calib(SourceEnumClass, StrEnum):
     PREDICTION_Y_RIGHT = auto()
 
     @classmethod
+    @override
     def schema(cls):
-        return {
-            cls.POINT_X: Float64,
-            cls.POINT_Y: Float64,
-            cls.PREDICTION_X_LEFT: Float64,
-            cls.PREDICTION_Y_LEFT: Float64,
-            cls.VALIDITY_LEFT: Int8,
-            cls.PREDICTION_X_RIGHT: Float64,
-            cls.PREDICTION_Y_RIGHT: Float64,
-            cls.VALIDITY_RIGHT: Int8,
-        }
+        return cast(
+            dict[Self, PolarsDataType],
+            {
+                cls.POINT_X: Float64,
+                cls.POINT_Y: Float64,
+                cls.PREDICTION_X_LEFT: Float64,
+                cls.PREDICTION_Y_LEFT: Float64,
+                cls.VALIDITY_LEFT: Int8,
+                cls.PREDICTION_X_RIGHT: Float64,
+                cls.PREDICTION_Y_RIGHT: Float64,
+                cls.VALIDITY_RIGHT: Int8,
+            },
+        )
 
     @classmethod
-    def scan_raw(cls, source: Path | bytes | IO[bytes]):
+    @override
+    def scan_raw(cls, source):
         return scan_csv(
             source,
             has_header=True,
@@ -1219,7 +1302,8 @@ class Calib(SourceEnumClass, StrEnum):
         )
 
     @classmethod
-    def scan(cls, source: Path | bytes | IO[bytes], pid: int):
+    @override
+    def scan(cls, source, pid: int):
         def xy(name: str):
             return struct(x=col(f"{name}_x"), y=col(f"{name}_y"))
 
@@ -1240,6 +1324,7 @@ class Calib(SourceEnumClass, StrEnum):
         )
 
     @classmethod
+    @override
     def source_filename(cls, value: str) -> bool:
         return value.endswith("specs.txt")
 
@@ -1250,15 +1335,20 @@ class Dot(SourceEnumClass, StrEnum):
     EPOCH = "Epoch"
 
     @classmethod
+    @override
     def schema(cls):
-        return {
-            cls.X: UInt16,
-            cls.Y: UInt16,
-            cls.EPOCH: Float64,
-        }
+        return cast(
+            dict[Self, PolarsDataType],
+            {
+                cls.X: UInt16,
+                cls.Y: UInt16,
+                cls.EPOCH: Float64,
+            },
+        )
 
     @classmethod
-    def scan_raw(cls, source: Path | bytes | IO[bytes]):
+    @override
+    def scan_raw(cls, source):
         return scan_csv(
             source,
             has_header=True,
@@ -1270,7 +1360,8 @@ class Dot(SourceEnumClass, StrEnum):
         )
 
     @classmethod
-    def scan(cls, source: Path | bytes | IO[bytes], pid: int):
+    @override
+    def scan(cls, source, pid: int):
         return (
             cls.scan_raw(source)
             .sort(cls.EPOCH)
@@ -1282,6 +1373,6 @@ class Dot(SourceEnumClass, StrEnum):
         )
 
     @classmethod
+    @override
     def source_filename(cls, value: str) -> bool:
         return value.endswith("final_dot_test_locations.tsv")
-

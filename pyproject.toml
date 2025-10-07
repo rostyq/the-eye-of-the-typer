@@ -13,6 +13,7 @@ dependencies = [
     "polars>=1.32",
     "rerun-sdk>=0.24,<0.25",
     "typer>=0.19,<0.20",
+    "tzdata>=2025.2",
 ]
 
 [build-system]
@@ -27,3 +28,12 @@ dev = [
 
 [tool.uv.build-backend]
 module-root = ""
+
+[tool.pyright]
+reportMissingTypeStubs = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportMissingParameterType = false
+reportAny = false
+reportExplicitAny = false

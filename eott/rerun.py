@@ -110,11 +110,9 @@ def log_events(
         .select(*TCOLS, "event", col("mouse").struct.unnest())
         .with_columns(
             mouse=concat_arr(["x", "y"]),
-            color=when(col("event") == "click").then(
-                lit((255, 140, 0), dtype=COLOR_DTYPE)
-            ).otherwise(
-                lit((255, 255, 0), dtype=COLOR_DTYPE)
-            ),
+            color=when(col("event") == "click")
+            .then(lit((255, 140, 0), dtype=COLOR_DTYPE))
+            .otherwise(lit((255, 255, 0), dtype=COLOR_DTYPE)),
         )
         .drop("x", "y")
         .collect()
@@ -255,7 +253,7 @@ def rerun_dataframe_indexes(df: DataFrame, /, tc: str = "timestamp"):
         *filter(
             None,
             [
-                TimeColumn("log_time", timestamp=df["timestamp"].to_numpy()),
+                TimeColumn("log_time", timestamp=df[tc].to_numpy()),
                 TimeColumn("rec_time", duration=df["rec_time"].to_numpy()),
                 TimeColumn("webcam_time", duration=df["webcam_time"].to_numpy()),
                 (

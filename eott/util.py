@@ -1,4 +1,5 @@
-from typing import cast, overload, Literal, Mapping, Iterable
+from typing import cast, overload, Literal
+from collections.abc import Mapping, Iterable
 from os import PathLike
 from re import findall
 from io import TextIOBase
@@ -169,19 +170,19 @@ def ffmpeg_args(
     *,
     exe: str = "ffmpeg",
     fmt: str | None = None,
-    cmds: Iterable[str] = [],
-    params: Mapping[str, str] = {},
+    cmds: Iterable[str] | None = None,
+    params: Mapping[str, str] | None = None,
 ):
     res = [exe, "-i", i]
 
     if fmt is not None:
-        res.insert(1, f"-f")
+        res.insert(1, "-f")
         res.insert(2, fmt)
 
-    for cmd in cmds:
+    for cmd in cmds or []:
         res.append(f"-{cmd}")
 
-    for key, value in params.items():
+    for key, value in (params or {}).items():
         res.append(f"-{key}")
         res.append(value)
 
@@ -190,12 +191,17 @@ def ffmpeg_args(
     return res
 
 
-def play_with_mpv(src: PathLike):
-    return run(["mpv", "--osd-fractions", "--osd-level=2", src], shell=True)
+def play_with_mpv(src: PathLike[str]):
+    return run(["mpv", "--osd-fractions", "--osd-level=2", str(src)], shell=True)
 
 
-def ffmpeg_blank(
-    output: str, duration: timedelta, *, width=640, height=480, fps: int = 30
+def ffmpeg_blank(  # pyright: ignore[reportUnknownParameterType]
+    output: str,
+    duration: timedelta,
+    *,
+    width: int = 640,
+    height: int = 480,
+    fps: int = 30,
 ):
     dur = round(duration.total_seconds(), 3)
     video = ff.input(
@@ -207,7 +213,10 @@ def ffmpeg_blank(
         f="lavfi",
     )
     return ff.output(
-        video, audio, output, format="mp4"  # , movflags="frag_keyframe+empty_moov",
+        video,
+        audio,
+        output,
+        format="mp4",  # , movflags="frag_keyframe+empty_moov",
     )
 
 

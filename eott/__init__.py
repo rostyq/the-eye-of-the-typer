@@ -1,4 +1,4 @@
-from typing import TypeAlias, Literal, cast, Any
+from typing import TypeAlias, Literal, cast, Any, override
 from abc import ABC, abstractmethod
 from enum import StrEnum
 from os import environ, PathLike
@@ -66,7 +66,7 @@ class IlluminatingMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Size[T: float]:
+class Size[T: float = float]:
     w: T
     h: T
 
@@ -89,7 +89,7 @@ class Point3:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Point2[T: float]:
+class Point2[T: float = float]:
     x: T
     y: T
 
@@ -99,7 +99,7 @@ class Point2[T: float]:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class Pair[T]:
+class Pair[T = Any]:
     left: T
     right: T
 
@@ -200,7 +200,7 @@ class FormEntry:
 
     def asdict(self):
         return asdict(self)
-    
+
     def json(self, indent: int | str | None = None):
         return json_dumps(
             self.asdict(),
@@ -219,7 +219,7 @@ class FormEntry:
             "STUDY INFORMATION:",
             f"  Setting:              {self.setting.value}",
             f"  Screen Distance:      {self.screen_distance:.1f} cm",
-            f"  Screen Start:         {self.screen_start.strftime('%Y-%m-%d %H:%M:%S') if self.screen_start else "N/A"}",
+            f"  Screen Start:         {self.screen_start.strftime('%Y-%m-%d %H:%M:%S') if self.screen_start else 'N/A'}",
             f"  Webcam Start:         {self.webcam_start.strftime('%Y-%m-%d %H:%M:%S')}",
             f"  Wall Clock:           {self.wall_clock.strftime('%Y-%m-%d %H:%M:%S') if self.wall_clock else 'N/A'}",
             f"  Init Start:           {self.init_start.strftime('%Y-%m-%d %H:%M:%S')}",
@@ -387,6 +387,8 @@ class DirDataset(DatasetPaths):
     This is the transformed dataset ready for analysis.
     """
 
+    _path: Path
+
     def __init__(self, path: PathLike[str] | str = "", /):
         if not path:
             path = Path(environ["EOTT_DATASET_PATH"]).expanduser().resolve()
@@ -396,18 +398,20 @@ class DirDataset(DatasetPaths):
             )
         self._path = path
 
-    def __repr__(self):
+    @override
+    def __repr__(self) -> str:
         return f"DirDataset(Path('{self._path}'))"
 
     @property
+    @override
     def root(self):
         return self._path
 
     def schema(self, name: DataType | DataName, /):
         return self.lazyframe(name).collect_schema()
 
-    def dataframe(self, name: DataType | DataName, /, **kwargs):
+    def dataframe(self, name: DataType | DataName, /, **kwargs: Any):
         return read_parquet(self.data_path(name), **kwargs)
 
-    def lazyframe(self, name: DataType | DataName, /, **kwargs):
+    def lazyframe(self, name: DataType | DataName, /, **kwargs: Any):
         return scan_parquet(self.data_path(name), **kwargs)
