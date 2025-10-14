@@ -309,9 +309,10 @@ def _merge_webcam_videos(
             dur = timedelta(seconds=float(vr.get_frame_timestamp(-1)[1]))
             gap = start_offset - previous_end
             # println(record, study, previous_end, "|", start_offset, "|", dur, "|", gap)
-            assert gap >= timedelta(), (
-                "Negative gap detected between webcam recordings!"
-            )
+            if gap < timedelta():
+                del vr
+                remove_file(str(path))
+                continue
 
             previous_end = start_offset + dur
 
