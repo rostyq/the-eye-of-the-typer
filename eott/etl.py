@@ -28,7 +28,7 @@ from .raw import (
 from .util import printf, println, ffmpeg_blank
 
 
-__all__ = ["extract_transform_load"]
+__all__ = ["extract_transform_load", "merge_webcam_videos"]
 
 
 def _sink_data(
@@ -265,7 +265,7 @@ def _concat_fragmented_webcam_videos(
         raise e
 
 
-def _merge_webcam_videos(
+def merge_webcam_videos(
     plf: LazyFrame, llf: LazyFrame, dstdir: Path, *, dry_run: bool, overwrite: bool
 ):
     interrupted = False
@@ -404,8 +404,7 @@ def extract_transform_load(
     tmpdir: Path,
     *,
     aligns_path: Path | None = None,
-    merge_webcam: bool = False,
-    sync: bool = True,
+    sync_video: bool = True,
     dry_run: bool = False,
     overwrite: bool = False,
 ):
@@ -413,7 +412,7 @@ def extract_transform_load(
 
     printf("Scanning participants and log files... ")
     plf, llf = ds.scan_participants(
-        sync, alf=Alignment.scan(aligns_path) if aligns_path else None
+        sync_video, alf=Alignment.scan(aligns_path) if aligns_path else None
     )
     println("Done.")
 
@@ -440,7 +439,7 @@ def extract_transform_load(
             ds, dstdir / "screen", tmpdir, dry_run=dry_run, overwrite=overwrite
         )
 
-    if (DataType.WEBCAM in process) or merge_webcam:
+    if DataType.WEBCAM in process:
         fragmented = _process_webcam_videos(
             ds, webcam_dstdir := dstdir / "webcam", dry_run=dry_run, overwrite=overwrite
         )
@@ -451,8 +450,3 @@ def extract_transform_load(
             )
             del pid, record, paths
         del fragmented
-
-        if merge_webcam:
-            _merge_webcam_videos(
-                plf, llf, webcam_dstdir, dry_run=dry_run, overwrite=overwrite
-            )

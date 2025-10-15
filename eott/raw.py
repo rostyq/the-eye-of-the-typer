@@ -308,36 +308,22 @@ class ZipDataset:
             orient="row",
         )
 
-        plf = (
-            pdf.lazy()
-            .join(
-                llf.select("pid", col("timestamp").alias("start_timestamp"), "event")
-                .filter(col("event") == "start")
-                .group_by("pid")
-                .first()
-                .drop("event"),
-                on="pid",
-            )
-            .join(
-                adf,
-                on="pid",
-                how="left",
-            )
-            .with_columns(
-                (col("start_timestamp") - col("start_time")).alias("screen_start")
-            )
-            .drop("start_timestamp", "start_time")
-            .join(slf, on="pid")
-            .join(
-                llf.filter(event="start")
-                .select("pid", "record", col("timestamp").alias("webcam_start"))
-                .sort("pid", "record")
-                .group_by("pid")
-                .first()
-                .drop("record"),
-                on="pid",
-            )
+        plf = pdf.lazy().join(adf, on="pid", how="left")
+        plf = plf.join(slf, on="pid", how="left")
+        plf = plf.join(
+            llf.select("pid", "record", "event", webcam_start="timestamp")
+            .filter(event="start")
+            .sort("pid", "webcam_start")
+            .group_by("pid")
+            .first(),
+            on="pid",
+            how="left",
         )
+        plf = plf.with_columns(
+            screen_start=col("screen_start").fill_null(col("webcam_start"))
+            - col("start_time")
+        )
+        plf = plf.drop("start_time")
         return plf, llf
 
 
