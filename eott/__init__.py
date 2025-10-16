@@ -341,7 +341,7 @@ class DatasetPaths(ABC):
         return self.root / "webcam"
 
     def data_path(self, name: DataType | DataName, suffix=DATA_SUFFIX):
-        return (self.root / DataType(name)).with_suffix(suffix)
+        return (self.root / DataType(name).path()).with_suffix(suffix)
 
     def screen_path(self, pid: int, suffix=VIDEO_SUFFIX):
         return (self.screen_dir / f"P_{pid:02}").with_suffix(suffix)

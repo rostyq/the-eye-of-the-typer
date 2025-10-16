@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from typer import Typer, Argument, Option, BadParameter, Context, CallbackParam
 
-from eott import DataType
+from eott import DataType, FormEntry
 
 
 def validate_output_path(
@@ -25,7 +25,11 @@ app = Typer()
 
 class Prepare(StrEnum):
     WEBCAM = "webcam"
+    """Merge webcam videos into a single video per participant."""
     CALIBRATION = "calibration"
+    """Extract calibration data from dot tests and Fitts' law studies."""
+    RERUN = "rerun"
+    """Generate rerun recordings for visualization."""
 
 
 PROCESSES = list(DataType)
@@ -72,6 +76,7 @@ def _(
     dry_run: DryRun = False,
     overwrite: Overwrite = False,
 ):
+    """Extract, transform, and load the raw dataset from a zip file."""
     from tempfile import TemporaryDirectory
     from eott.util import println
     from eott.etl import extract_transform_load
@@ -120,21 +125,26 @@ def _(
     dry_run: DryRun = False,
     overwrite: Overwrite = False,
 ):
+    """Post-processing for extracted dataset."""
     from eott import DirDataset
-    from eott.etl import merge_webcam_videos
     from eott.util import println
 
     from polars import col, PartitionByKey, lit, Float64
 
     ds = DirDataset(input_path)
-    output_path = input_path / "webcam" if output_path is None else output_path
 
     start_time = time()
 
     plf, llf = ds.lazyframe("form"), ds.lazyframe("log")
 
     if "webcam" in process:
-        merge_webcam_videos(plf, llf, output_path, dry_run=dry_run, overwrite=overwrite)
+        from eott.etl import merge_webcam_videos
+
+        output_dir = (output_path or input_path) / "webcam"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        merge_webcam_videos(plf, llf, output_dir, dry_run=dry_run, overwrite=overwrite)
+
     if "calibration" in process:
         lf = llf.select(
             "pid", "study", "timestamp", col("mouse").struct.unnest(), "event"
@@ -152,7 +162,7 @@ def _(
         # lf = lf.drop("study", "event", "webcam_start")
         lf.sink_csv(
             PartitionByKey(
-                output_path,
+                (output_path or input_path) / "tobii",
                 file_path=lambda ctx: f"P_{ctx.keys[0].raw_value:02d}.csv",
                 by="pid",
                 per_partition_sort_by="timestamp",
@@ -160,11 +170,83 @@ def _(
             )
         )
 
+    if "rerun" in process:
+        from rerun import RecordingStream
+        from rerun.blueprint import (
+            Blueprint,
+            Horizontal,
+            Vertical,
+            Spatial2DView,
+            TextLogView,
+        )
+        from eott.rerun import (
+            log_screen_video,
+            log_webcam_video,
+            with_timelines,
+            log_events,
+            log_tobii,
+            log_dot,
+        )
+
+        bb = Blueprint(
+            Horizontal(
+                Vertical(
+                    Spatial2DView(origin="webcam"),
+                    Spatial2DView(
+                        origin="screen", contents="+screen +mouse +tobii +dot"
+                    ),
+                ),
+                TextLogView(origin="event"),
+            )
+        )
+        output_dir = output_path / "rerun" if output_path else None
+        if output_dir is not None:
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        tlf = ds.lazyframe("tobii")
+        dlf = ds.lazyframe("dot")
+
+        for form in plf.collect().iter_rows(named=True, buffer_size=1):
+            form = FormEntry(**form)
+            rid = f"P_{form.pid:02d}"
+            if dry_run:
+                println(f"Would create RERUN recording {rid}")
+                continue
+
+            with RecordingStream("EOTT", recording_id=rid) as rrd:
+                if output_dir is None:
+                    rrd.connect_grpc()
+                else:
+                    dst = (output_dir / (rrd.get_recording_id() or rid)).with_suffix(
+                        ".rrd"
+                    )
+                    if dst.exists() and not overwrite:
+                        println(f"Skipping existing RERUN recording {dst}")
+                        continue
+
+                    rrd.save(dst)
+                rrd.send_blueprint(bb)
+
+                screen_available = log_screen_video(form, ds)
+                log_webcam_video(form, ds, screen=screen_available)
+                log_events(
+                    with_timelines(
+                        llf.filter(pid=form.pid), form, screen=screen_available
+                    )
+                )
+                log_tobii(
+                    with_timelines(
+                        tlf.filter(pid=form.pid), form, screen=screen_available
+                    ),
+                    form,
+                )
+                log_dot(with_timelines(dlf, form, screen=screen_available))
+
+                rrd.flush()
+
     elapsed_time = timedelta(seconds=time() - start_time)
 
-    println(
-        f"Preparing process completed in {elapsed_time}. Files saved to {output_path}",
-    )
+    println(f"Preparing process completed in {elapsed_time}.")
 
 
 app()

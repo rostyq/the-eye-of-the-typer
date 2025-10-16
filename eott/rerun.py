@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "log_events",
+    "log_dot",
     "log_tobii",
     "log_screen_video",
     "log_webcam_video",
@@ -55,6 +56,23 @@ def with_timelines(
         .with_columns(
             screen_time=col("rec_time") - lit(f.screen_delay) if screen else None
         )
+    )
+
+
+def log_dot(
+    lf: LazyFrame,
+    /,
+    *,
+    recording: RecordingStream | None = None,
+):
+    df = lf.collect()
+    send_columns(
+        "dot",
+        indexes=rerun_dataframe_indexes(df),
+        columns=Points2D.columns(
+            positions=df["dot"].to_numpy(), colors=[Color((0, 0, 0))] * len(df)
+        ),
+        recording=recording,
     )
 
 

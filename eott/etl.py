@@ -9,7 +9,7 @@ from collections import defaultdict
 from shutil import move as move_file
 from functools import partial
 
-from polars import LazyFrame
+from polars import LazyFrame, PartitionByKey, col, struct
 from decord import VideoReader
 
 import ffmpeg as ff
@@ -277,9 +277,6 @@ def merge_webcam_videos(
         if interrupted:
             break
 
-        # if pid != 7:
-        #     continue
-
         df = (
             llf.filter(pid=pid, event="start")
             .select("record", "timestamp", "study")
@@ -420,16 +417,37 @@ def extract_transform_load(
     sinkparams = dict(compression="uncompressed")
 
     if DataType.FORM in process:
-        _sink(plf, dstdir / "form.parquet", sinkparams)
+        _sink(plf.drop("screen_viewport_y"), dstdir / "form.parquet", sinkparams)
 
     if DataType.LOG in process:
         _sink(llf, dstdir / "log.parquet", sinkparams)
 
     if DataType.TOBII in process:
-        _sink(Tobii.scan_zip(zip), dstdir / "tobii.parquet", {"compression": "lz4"})
+        base_path = dstdir / "tobii"
+        tlf = Tobii.scan_zip(zip)
+        printf(f"Saving tobii to {base_path} ... ")
+        if dry_run:
+            println("Skipped. (dry run)")
+        else:
+            tlf.sink_parquet(
+                PartitionByKey(
+                    base_path,
+                    file_path=lambda ctx: f"P_{ctx.keys[0].raw_value:02d}.parquet",
+                    by="pid",
+                    per_partition_sort_by="timestamp",
+                    include_key=True,
+                ),
+                compression="lz4",
+                mkdir=True,
+            )
+            println("Done.")
 
     if DataType.DOT in process:
-        _sink(Dot.scan_zip(zip), dstdir / "dot.parquet", sinkparams)
+        lf = Dot.scan_zip(zip).with_columns(col("dot").struct.unnest()).drop("dot")
+        lf = lf.join(plf.select("pid", oy="screen_viewport_y"), "pid", "left")
+        lf = lf.with_columns(y=col("y") + col("oy"))
+        lf = lf.with_columns(dot=struct("x", "y")).drop("x", "y", "oy")
+        _sink(lf, dstdir / "dot.parquet", sinkparams)
 
     if DataType.CALIB in process:
         _sink(Calib.scan_zip(zip), dstdir / "calib.parquet", sinkparams)

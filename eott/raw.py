@@ -90,35 +90,65 @@ InputType = Path | bytes | IO[bytes]
 
 class DataType(StrEnum):
     FORM = auto()
+    """Participant characteristics form"""
     SCREEN = auto()
+    """Screen recording video"""
     WEBCAM = auto()
+    """Webcam recording video"""
     LOG = auto()
+    """Web interaction log"""
     TOBII = auto()
+    """Tobii eye-tracking data"""
     DOT = auto()
+    """Dot test final data"""
     CALIB = auto()
+    """Tobii calibration data"""
+
+    def path(self):
+        return Path(self if self != "tobii" else f"{self}/*")
 
 
 class Study(NameEnum):
     DOT_TEST_INSTRUCTIONS = auto()
+    """Dot test instructions"""
     DOT_TEST = auto()
+    """Dot test"""
     FITTS_LAW_INSTRUCTIONS = auto()
+    """Fitts' law instructions"""
     FITTS_LAW = auto()
+    """Fitts' law"""
     SERP_INSTRUCTIONS = auto()
+    """SERP instructions"""
     BENEFITS_OF_RUNNING_INSTRUCTIONS = auto()
+    """Benefits of running instructions"""
     BENEFITS_OF_RUNNING = auto()
+    """Benefits of running"""
     BENEFITS_OF_RUNNING_WRITING = auto()
+    """Benefits of running writing"""
     EDUCATIONAL_ADVANTAGES_OF_SOCIAL_NETWORKING_SITES_INSTRUCTIONS = auto()
+    """Educational advantages of social networking sites instructions"""
     EDUCATIONAL_ADVANTAGES_OF_SOCIAL_NETWORKING_SITES = auto()
+    """Educational advantages of social networking sites"""
     EDUCATIONAL_ADVANTAGES_OF_SOCIAL_NETWORKING_SITES_WRITING = auto()
+    """Educational advantages of social networking sites writing"""
     WHERE_TO_FIND_MOREL_MUSHROOMS_INSTRUCTIONS = auto()
+    """Where to find morel mushrooms instructions"""
     WHERE_TO_FIND_MOREL_MUSHROOMS = auto()
+    """Where to find morel mushrooms"""
     WHERE_TO_FIND_MOREL_MUSHROOMS_WRITING = auto()
+    """Where to find morel mushrooms writing"""
     TOOTH_ABSCESS_INSTRUCTIONS = auto()
+    """Tooth abscess instructions"""
     TOOTH_ABSCESS = auto()
+    """Tooth abscess"""
     TOOTH_ABSCESS_WRITING = auto()
+    """Tooth abscess writing"""
     DOT_TEST_FINAL_INSTRUCTIONS = auto()
+    """Dot test final instructions"""
     DOT_TEST_FINAL = auto()
+    """Dot test final"""
     THANK_YOU = auto()
+    """Thank you"""
 
     def _cmp(self, other: Self | str, /, op: Callable[[int, int], bool]):
         return op(self.id, (other if isinstance(other, Study) else Study(other)).id)
@@ -307,22 +337,28 @@ class ZipDataset:
             schema={"pid": UInt8, "start_time": Duration("us")},
             orient="row",
         )
+        odf = LazyFrame(
+            [("Laptop", 97), ("PC", 66)],
+            schema={"setting": Enum(Setting), "screen_viewport_y": Int32},
+            orient="row",
+        )
 
         plf = pdf.lazy().join(adf, on="pid", how="left")
+        plf = plf.join(odf, on="setting", how="left")
         plf = plf.join(slf, on="pid", how="left")
-        plf = plf.join(
-            llf.select("pid", "record", "event", webcam_start="timestamp")
+        plf = plf.drop("screen_start").join(
+            llf.select(
+                "pid", "event", webcam_start="timestamp", screen_start="timestamp"
+            )
             .filter(event="start")
+            .drop("event")
             .sort("pid", "webcam_start")
             .group_by("pid")
             .first(),
             on="pid",
             how="left",
         )
-        plf = plf.with_columns(
-            screen_start=col("screen_start").fill_null(col("webcam_start"))
-            - col("start_time")
-        )
+        plf = plf.with_columns(screen_start=col("screen_start") - col("start_time"))
         plf = plf.drop("start_time")
         return plf, llf
 
@@ -1326,8 +1362,8 @@ class Dot(SourceEnumClass, StrEnum):
         return cast(
             dict[Self, PolarsDataType],
             {
-                cls.X: UInt16,
-                cls.Y: UInt16,
+                cls.X: Int32,
+                cls.Y: Int32,
                 cls.EPOCH: Float64,
             },
         )
