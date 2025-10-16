@@ -1,4 +1,4 @@
-md5: 519e003064a9551a2b310216c262d565
+md5: dd01d9246efde35989e4d8c6e3cbb983
 frozen: true
 deps:
 - checksum: '"4f368c5af-5abdcaee5bdc0"'
@@ -9,3 +9,5 @@ deps:
 outs:
 - hash: md5
   path: WebGazerETRA2018Dataset_Release20180420.zip
+  md5: 91e6411bc785fff13949e4e4e0ac2ed0
+  size: 21263599023
