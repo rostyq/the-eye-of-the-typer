@@ -3,10 +3,9 @@
 
 # %%
 # %load_ext dotenv
-# %load_ext autoreload
 # %dotenv
 # %env EOTT_DATASET_PATH
-#
+
 # %%
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,11 +23,14 @@ from eott.rerun import *
 
 # %%
 pl.Config.set_tbl_formatting("NOTHING")
+pl.Config.set_tbl_rows(25)
 pl.Config.set_tbl_hide_column_data_types(True)
 
 
 # %%
 ds = DirDataset()
+# %%
+print_schema(ds.schema("dot"))
 
 # %%
 print_schema(ds.schema("log"))
@@ -39,7 +41,7 @@ rrdir.mkdir(exist_ok=True)
 form = FormEntry(
     **next(
         ds.lazyframe("form", cache=False)
-        .filter(pid=7)
+        .filter(pid=1)
         .collect()
         .iter_rows(named=True, buffer_size=1)
     )
