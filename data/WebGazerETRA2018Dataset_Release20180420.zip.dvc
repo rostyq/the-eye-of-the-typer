@@ -1,0 +1,11 @@
+md5: 519e003064a9551a2b310216c262d565
+frozen: true
+deps:
+- checksum: '"4f368c5af-5abdcaee5bdc0"'
+  size: 21263599023
+  hash: md5
+  path: 
+    https://webgazer.cs.brown.edu/data/WebGazerETRA2018Dataset_Release20180420.zip
+outs:
+- hash: md5
+  path: WebGazerETRA2018Dataset_Release20180420.zip
