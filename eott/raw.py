@@ -281,14 +281,6 @@ class ZipDataset:
         llf = Log.scan_zip(self.ref)
         slf = Spec.scan_zip(self.ref)
 
-        if alf is not None:
-            llf = llf.join(alf.drop("log"), ["pid", "record", "study"], "left")
-            llf = llf.with_columns(
-                timestamp=col("timestamp")
-                - col("frameshift").fill_null(duration(milliseconds=0, time_unit="ms")),
-                # aligned=pl.col("frameshift").is_not_null(),
-            ).drop("frameshift")
-
         # first task frame in screen recording and timestamp
         # when screen clock change minute
         adjustments_table = {
@@ -360,6 +352,15 @@ class ZipDataset:
         )
         plf = plf.with_columns(screen_start=col("screen_start") - col("start_time"))
         plf = plf.drop("start_time")
+
+        if alf is not None:
+            llf = llf.join(alf.drop("log"), ["pid", "record", "study"], "left")
+            llf = llf.with_columns(
+                timestamp=col("timestamp")
+                - col("frameshift").fill_null(duration(milliseconds=0, time_unit="ms")),
+                # aligned=pl.col("frameshift").is_not_null(),
+            ).drop("frameshift")
+
         return plf, llf
 
 
