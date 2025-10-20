@@ -1,2 +1,10 @@
-/WebGazerETRA2018Dataset_Release20180420.zip
-/webGazerAlignment.csv
+*.rrd
+*.mp4
+*.parquet
+*.csv
+*.zip
+/tobii
+/screen
+/raw
+/webcam
+/rerun

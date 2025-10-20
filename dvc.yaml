@@ -1,0 +1,35 @@
+vars:
+  - dataset: data/WebGazerETRA2018Dataset_Release20180420.zip
+  - alignment: data/webGazerAlignment.csv
+stages:
+  etl:
+    cmd: uv run eott etl ${dataset} --alignment-path ${alignment} --sync-video --output-path data/
+    deps:
+      - ${dataset}
+      - ${alignment}
+    outs:
+      - data/form.parquet
+      - data/log.parquet
+      - data/dot.parquet
+      - data/calib.parquet
+      - data/tobii/:
+          persist: true
+      - data/screen/:
+          persist: true
+      - data/raw/:
+          persist: true
+
+  prepare:
+    cmd: uv run eott prepare data/
+    deps:
+      - data/form.parquet
+      - data/log.parquet
+      - data/dot.parquet
+      - data/tobii/
+      - data/screen/
+      - data/raw/
+    outs:
+      - data/rerun/:
+          persist: true
+      - data/webcam/:
+          persist: true

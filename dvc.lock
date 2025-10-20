@@ -1,0 +1,47 @@
+schema: '2.0'
+stages:
+  etl:
+    cmd: uv run eott etl data/WebGazerETRA2018Dataset_Release20180420.zip 
+      --alignment-path data/webGazerAlignment.csv --sync-video --output-path 
+      data/
+    deps:
+    - path: data/WebGazerETRA2018Dataset_Release20180420.zip
+      hash: md5
+      md5: 91e6411bc785fff13949e4e4e0ac2ed0
+      size: 21263599023
+    - path: data/webGazerAlignment.csv
+      hash: md5
+      md5: 5252c8dcb441a05d994461ba596385b5
+      size: 54665
+    outs:
+    - path: data/calib.parquet
+      hash: md5
+      md5: af51a2494a042068520887427fa3b213
+      size: 48572
+    - path: data/dot.parquet
+      hash: md5
+      md5: d335e16eb0c2b68089a33561ab8c43b2
+      size: 1638159
+    - path: data/form.parquet
+      hash: md5
+      md5: fe833c338d5a7a104faa2ccf5aeaedf9
+      size: 29761
+    - path: data/log.parquet
+      hash: md5
+      md5: 8a8c687e98568d007bfa01f76729403c
+      size: 30910349
+    - path: data/raw/
+      hash: md5
+      md5: 4bb781c8c28175987b2164e2d527a022.dir
+      size: 2485607891
+      nfiles: 1323
+    - path: data/screen/
+      hash: md5
+      md5: d2ce76b24a050a6e03e4ccb2c57bf03f.dir
+      size: 1317348584
+      nfiles: 27
+    - path: data/tobii/
+      hash: md5
+      md5: 91e13daa89bc2ce31279d5a40a42f77f.dir
+      size: 836397368
+      nfiles: 51

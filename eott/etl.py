@@ -459,7 +459,10 @@ def extract_transform_load(
 
     if DataType.WEBCAM in process:
         fragmented = _process_webcam_videos(
-            ds, webcam_dstdir := dstdir / "webcam", dry_run=dry_run, overwrite=overwrite
+            ds,
+            webcam_dstdir := dstdir / "raw",
+            dry_run=dry_run,
+            overwrite=overwrite,
         )
 
         for (pid, record), paths in fragmented.items():
