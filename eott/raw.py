@@ -361,7 +361,7 @@ class ZipDataset:
                 # aligned=pl.col("frameshift").is_not_null(),
             ).drop("frameshift")
 
-        return plf, llf
+        return plf.sort("pid"), llf.sort("pid", "timestamp")
 
 
 class Setting(StrEnum):

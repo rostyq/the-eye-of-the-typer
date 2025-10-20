@@ -8,6 +8,7 @@ from datetime import timedelta
 from collections import defaultdict
 from shutil import move as move_file
 from functools import partial
+from itertools import chain
 
 from polars import LazyFrame, PartitionByKey, col, struct
 from decord import VideoReader
@@ -266,16 +267,28 @@ def _concat_fragmented_webcam_videos(
 
 
 def merge_webcam_videos(
-    plf: LazyFrame, llf: LazyFrame, dstdir: Path, *, dry_run: bool, overwrite: bool
+    plf: LazyFrame,
+    llf: LazyFrame,
+    srcdir: Path,
+    dstdir: Path,
+    tmpdir: Path,
+    *,
+    dry_run: bool,
+    overwrite: bool,
 ):
     interrupted = False
     pid: int
     webcam_first_start: datetime
     for pid, webcam_first_start in (
-        plf.select("pid", "webcam_start").collect().iter_rows()
+        plf.sort("pid").select("pid", "webcam_start").collect().iter_rows()
     ):
         if interrupted:
             break
+
+        output_path = (dstdir / f"P_{pid:02}").with_suffix(".mp4")
+        if output_path.exists() and not overwrite:
+            println("Skipped. (already exists)")
+            continue
 
         df = (
             llf.filter(pid=pid, event="start")
@@ -288,10 +301,15 @@ def merge_webcam_videos(
         record: int
         webcam_part_start: datetime
         previous_path: Path | None = None
+
+        partdir = tmpdir / f"P_{pid:02}"
+        partdir.mkdir(exist_ok=True)
+
+        input_files: list[Path] = []
         # print(pid, webcam_first_start)
         for record, webcam_part_start, study in df.iter_rows():
             study = Study(study)
-            path = (dstdir / f"P_{pid:02}" / f"{record:02}-{study.value}").with_suffix(
+            path = (srcdir / f"P_{pid:02}" / f"{record:02}-{study.value}").with_suffix(
                 ".mp4"
             )
             start_offset = webcam_part_start - webcam_first_start
@@ -308,26 +326,26 @@ def merge_webcam_videos(
             # println(record, study, previous_end, "|", start_offset, "|", dur, "|", gap)
             if gap < timedelta():
                 del vr
-                remove_file(str(path))
                 continue
 
+            input_files.append(path)
             previous_end = start_offset + dur
 
             if previous_path is None or gap < timedelta(milliseconds=30):
                 previous_path = path
                 continue
 
-            blank_path = path.with_stem(previous_path.stem + "-gap")
+            blank_path = (partdir / f"{path.stem}-gap").with_suffix(".mp4")
 
             if dry_run:
                 println(
-                    f"Would create blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds",
+                    f"Would create blank video for {blank_path.relative_to(tmpdir)} with duration {gap.total_seconds()} seconds",
                 )
                 previous_path = path
                 continue
 
             printf(
-                f"Creating blank video for {blank_path.relative_to(dstdir)} with duration {gap.total_seconds()} seconds... ",
+                f"Creating blank video for {blank_path.relative_to(tmpdir)} with duration {gap.total_seconds()} seconds... ",
             )
 
             if blank_path.exists() and not overwrite:
@@ -357,22 +375,15 @@ def merge_webcam_videos(
             del vr, dur, gap, record, study, start_offset, path
         del previous_end, webcam_first_start
 
-        input_dir = dstdir / f"P_{pid:02}"
-        output_path = input_dir.with_suffix(".mp4")
-
-        # for p in sorted(input_dir.glob("*.mp4"), key=lambda p: p.stem):
-        #     print(p)
-
         if not dry_run:
             printf(f"Concatenating webcam videos for participant {pid} ... ")
 
-            if output_path.exists() and not overwrite:
-                println("Skipped. (already exists)")
-                continue
-
             inputs = [
                 ff.input(str(p))
-                for p in sorted(input_dir.glob("*.mp4"), key=lambda p: p.stem)
+                for p in sorted(
+                    chain(partdir.glob("*.mp4"), input_files),
+                    key=lambda p: p.stem,
+                )
             ]
 
             try:

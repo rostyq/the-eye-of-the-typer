@@ -4,6 +4,7 @@ from pathlib import Path
 from zipfile import ZipFile
 from time import time
 from datetime import timedelta
+from tempfile import TemporaryDirectory
 
 from typer import Typer, Argument, Option, BadParameter, Context, CallbackParam
 
@@ -77,7 +78,6 @@ def _(
     overwrite: Overwrite = False,
 ):
     """Extract, transform, and load the raw dataset from a zip file."""
-    from tempfile import TemporaryDirectory
     from eott.util import println
     from eott.etl import extract_transform_load
 
@@ -143,10 +143,19 @@ def _(
         output_dir = (output_path or input_path) / "webcam"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        merge_webcam_videos(plf, llf, output_dir, dry_run=dry_run, overwrite=overwrite)
+        with TemporaryDirectory(prefix="eott-", ignore_cleanup_errors=True) as tmp_dir:
+            merge_webcam_videos(
+                plf,
+                llf,
+                input_path / "raw",
+                output_dir,
+                Path(tmp_dir),
+                dry_run=dry_run,
+                overwrite=overwrite,
+            )
 
-    if "calibration" in process:
-        lf = llf.select(
+    if "calibration" in process and False:
+        lf = llf.select(  # pyright: ignore[reportUnreachable]
             "pid", "study", "timestamp", col("mouse").struct.unnest(), "event"
         )
         lf = lf.filter(col("study").is_in(["dot_test", "fitts_law"]))
@@ -179,7 +188,7 @@ def _(
             Spatial2DView,
             TextLogView,
         )
-        from eott.rerun import (
+        from eott.rerun_utils import (
             log_screen_video,
             log_webcam_video,
             with_timelines,
