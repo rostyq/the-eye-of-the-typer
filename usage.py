@@ -19,7 +19,7 @@ import rerun.blueprint as rrb
 from decord import VideoReader
 
 from eott import *
-from eott.rerun import *
+from eott.rerun_utils import *
 
 # %%
 pl.Config.set_tbl_formatting("NOTHING")
