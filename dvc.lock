@@ -20,16 +20,16 @@ stages:
       size: 48572
     - path: data/dot.parquet
       hash: md5
-      md5: d335e16eb0c2b68089a33561ab8c43b2
-      size: 1638159
+      md5: 5560764a23d518f7e8ece445c7ec9dec
+      size: 1638208
     - path: data/form.parquet
       hash: md5
-      md5: fe833c338d5a7a104faa2ccf5aeaedf9
-      size: 29761
+      md5: ef1a7eaf8ff2d3126fa6676d75918ac0
+      size: 29755
     - path: data/log.parquet
       hash: md5
-      md5: 8a8c687e98568d007bfa01f76729403c
-      size: 30910349
+      md5: e1b96f5eb96c391c3753b88048a236d3
+      size: 30889470
     - path: data/raw/
       hash: md5
       md5: 4bb781c8c28175987b2164e2d527a022.dir
@@ -44,4 +44,45 @@ stages:
       hash: md5
       md5: 91e13daa89bc2ce31279d5a40a42f77f.dir
       size: 836397368
+      nfiles: 51
+  prepare:
+    cmd: uv run eott prepare data/ --output-path data/
+    deps:
+    - path: data/dot.parquet
+      hash: md5
+      md5: 5560764a23d518f7e8ece445c7ec9dec
+      size: 1638208
+    - path: data/form.parquet
+      hash: md5
+      md5: ef1a7eaf8ff2d3126fa6676d75918ac0
+      size: 29755
+    - path: data/log.parquet
+      hash: md5
+      md5: e1b96f5eb96c391c3753b88048a236d3
+      size: 30889470
+    - path: data/raw/
+      hash: md5
+      md5: 4bb781c8c28175987b2164e2d527a022.dir
+      size: 2485607891
+      nfiles: 1323
+    - path: data/screen/
+      hash: md5
+      md5: d2ce76b24a050a6e03e4ccb2c57bf03f.dir
+      size: 1317348584
+      nfiles: 27
+    - path: data/tobii/
+      hash: md5
+      md5: 91e13daa89bc2ce31279d5a40a42f77f.dir
+      size: 836397368
+      nfiles: 51
+    outs:
+    - path: data/rerun/
+      hash: md5
+      md5: c3358130bee95ec89945e184a58780e6.dir
+      size: 3134911756
+      nfiles: 51
+    - path: data/webcam/
+      hash: md5
+      md5: 0633379fe7219d1e948f4355f042e732.dir
+      size: 1808426564
       nfiles: 51

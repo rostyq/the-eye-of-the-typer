@@ -20,7 +20,7 @@ stages:
           persist: true
 
   prepare:
-    cmd: uv run eott prepare data/
+    cmd: uv run eott prepare data/ --output-path data/
     deps:
       - data/form.parquet
       - data/log.parquet
